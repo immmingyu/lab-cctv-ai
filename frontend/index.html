@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>연구실 지능형 CCTV</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --text:#e2e8f0; --muted:#94a3b8; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:-apple-system,"Malgun Gothic",sans-serif; background:var(--bg); color:var(--text); }
+  header { padding:18px 24px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; }
+  h1 { margin:0; font-size:20px; }
+  #status { font-size:13px; color:var(--muted); }
+  .wrap { max-width:900px; margin:0 auto; padding:20px; }
+  .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:16px; }
+  .stat { background:var(--card); border-radius:10px; padding:14px; text-align:center; }
+  .stat b { display:block; font-size:26px; }
+  .stat span { font-size:12px; color:var(--muted); }
+  .filters { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
+  .filters button { background:var(--card); color:var(--text); border:1px solid var(--line); border-radius:999px; padding:6px 14px; cursor:pointer; font-size:13px; }
+  .filters button.active { background:#3b82f6; border-color:#3b82f6; }
+  .event { background:var(--card); border-left:5px solid #22c55e; border-radius:10px; padding:14px 16px; margin-bottom:10px; }
+  .event.MEDIUM { border-left-color:#f59e0b; }
+  .event.HIGH, .event.CRITICAL { border-left-color:#ef4444; }
+  .row { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
+  .type { font-weight:700; }
+  .badge { font-size:12px; font-weight:700; padding:2px 10px; border-radius:999px; background:#22c55e; color:#052e16; }
+  .badge.MEDIUM { background:#f59e0b; color:#451a03; }
+  .badge.HIGH, .badge.CRITICAL { background:#ef4444; color:#fff; }
+  .summary { margin:8px 0 6px; font-size:14px; }
+  .meta { font-size:12px; color:var(--muted); }
+  .empty { text-align:center; color:var(--muted); padding:40px 0; }
+  .snap { display:block; width:100%; max-width:360px; border-radius:8px; margin-top:10px; cursor:zoom-in; border:1px solid var(--line); }
+  .ai { margin:8px 0; padding:10px 12px; background:#0b1220; border:1px solid var(--line); border-radius:8px; font-size:14px; line-height:1.6; }
+  .chat { background:var(--card); border-radius:10px; padding:14px 16px; margin-bottom:16px; }
+  .chat-row { display:flex; gap:8px; }
+  .chat input { flex:1; background:#0b1220; color:var(--text); border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-size:14px; }
+  .chat .send { background:#3b82f6; color:#fff; border:none; border-radius:8px; padding:0 16px; cursor:pointer; font-size:14px; }
+  .chat .send:disabled { opacity:.5; cursor:default; }
+  .examples { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
+  .examples button { background:transparent; color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:4px 10px; font-size:12px; cursor:pointer; }
+  .answer { margin-top:12px; white-space:pre-wrap; font-size:14px; line-height:1.6; }
+  .answer:empty { display:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎥 연구실 지능형 CCTV</h1>
+  <div id="status">연결 중...</div>
+</header>
+
+<div class="wrap">
+  <div class="stats">
+    <div class="stat"><b id="s-all">0</b><span>전체 이벤트</span></div>
+    <div class="stat"><b id="s-fall">0</b><span>낙상 감지</span></div>
+    <div class="stat"><b id="s-intr">0</b><span>제한 구역 접근</span></div>
+    <div class="stat"><b id="s-disp">0</b><span>물건 이동</span></div>
+  </div>
+
+  <div class="chat">
+    <div class="chat-row">
+      <input id="q" placeholder="CCTV에 질문해보세요. 예: 오늘 연구실에서 이상한 일 있었어?">
+      <button class="send" id="ask">질문</button>
+    </div>
+    <div class="examples" id="examples"></div>
+    <div class="answer" id="answer"></div>
+  </div>
+
+  <div class="filters" id="filters"></div>
+  <div id="list"></div>
+</div>
+
+<script>
+const TYPE_LABEL = {
+  fall_detection: "🚨 낙상 감지",
+  restricted_area_intrusion: "⛔ 제한 구역 접근",
+  object_displacement: "📦 물건 이동",
+};
+const FILTERS = [["", "전체"], ["fall_detection", "낙상"], ["restricted_area_intrusion", "제한 구역"], ["object_displacement", "물건 이동"]];
+const EXAMPLES = [
+  "오늘 연구실에서 이상한 일 있었어?",
+  "오늘 가장 위험했던 상황은 뭐야?",
+  "제한 구역에 누가 들어온 적 있어?",
+  "물건이 이동한 적 있어?",
+];
+
+let allEvents = [];
+let currentFilter = "";
+let lastJson = "";
+
+function fmtTime(ev) {
+  const d = new Date(ev.timestamp);
+  if (!isNaN(d)) return d.toLocaleString("ko-KR");
+  const c = new Date(ev.created_at);
+  return isNaN(c) ? ev.timestamp : c.toLocaleString("ko-KR");
+}
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+/* ---------- 이벤트 목록 ---------- */
+function renderFilters() {
+  const box = document.getElementById("filters");
+  box.innerHTML = "";
+  FILTERS.forEach(([value, label]) => {
+    const b = el("button", value === currentFilter ? "active" : "", label);
+    b.onclick = () => { currentFilter = value; renderFilters(); render(); };
+    box.appendChild(b);
+  });
+}
+
+function render() {
+  const count = t => allEvents.filter(e => e.event_type === t).length;
+  document.getElementById("s-all").textContent = allEvents.length;
+  document.getElementById("s-fall").textContent = count("fall_detection");
+  document.getElementById("s-intr").textContent = count("restricted_area_intrusion");
+  document.getElementById("s-disp").textContent = count("object_displacement");
+
+  const list = document.getElementById("list");
+  list.innerHTML = "";
+  const shown = allEvents.filter(e => !currentFilter || e.event_type === currentFilter);
+  if (shown.length === 0) { list.appendChild(el("div", "empty", "아직 이벤트가 없습니다.")); return; }
+
+  shown.forEach(ev => {
+    const card = el("div", "event " + ev.risk);
+    const top = el("div", "row");
+    top.appendChild(el("span", "type", TYPE_LABEL[ev.event_type] || ev.event_type));
+    top.appendChild(el("span", "badge " + ev.risk, ev.risk));
+    card.appendChild(top);
+    card.appendChild(el("div", "summary", ev.summary));
+    if (ev.llm_summary) {
+      card.appendChild(el("div", "ai", "🤖 " + ev.llm_summary));
+    }
+    card.appendChild(el("div", "meta",
+      `${fmtTime(ev)} · ${ev.object} · ${ev.location} · 신뢰도 ${ev.confidence} · ${ev.duration_seconds}초`));
+
+    if (ev.clip_path && ev.clip_path.startsWith("snapshots/")) {
+      const img = el("img", "snap");
+      img.src = "/" + ev.clip_path;
+      img.alt = "이벤트 스냅샷";
+      img.loading = "lazy";
+      img.onclick = () => window.open(img.src, "_blank");
+      card.appendChild(img);
+    }
+    list.appendChild(card);
+  });
+}
+
+async function load() {
+  const status = document.getElementById("status");
+  try {
+    const res = await fetch("/events?limit=200");
+    const text = await res.text();
+    if (text !== lastJson) {
+      lastJson = text;
+      allEvents = JSON.parse(text);
+      render();
+    }
+    status.textContent = "● 실시간 연결됨 · " + new Date().toLocaleTimeString("ko-KR");
+  } catch (e) {
+    console.error(e);
+    status.textContent = "○ 서버 연결 실패";
+  }
+}
+
+/* ---------- 자연어 질문 ---------- */
+async function ask(question) {
+  question = question.trim();
+  if (!question) return;
+  const btn = document.getElementById("ask");
+  const answer = document.getElementById("answer");
+  btn.disabled = true;
+  answer.textContent = "🤖 기록을 확인하는 중...";
+  try {
+    const res = await fetch("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+    });
+    const data = await res.json();
+        answer.textContent = `🤖 ${data.answer}\n\n(${data.scope} 이벤트 ${data.event_count}건 기준)`;
+  } catch (e) {
+    console.error(e);
+    answer.textContent = "질문 처리에 실패했습니다. 서버를 확인해주세요.";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function setupChat() {
+  const input = document.getElementById("q");
+  document.getElementById("ask").onclick = () => ask(input.value);
+  input.addEventListener("keydown", e => {
+    // isComposing: 한글 입력 조합 중에 Enter가 두 번 처리되는 문제 방지
+    if (e.key === "Enter" && !e.isComposing) ask(input.value);
+  });
+  const box = document.getElementById("examples");
+  EXAMPLES.forEach(text => {
+    const b = el("button", "", text);
+    b.onclick = () => { input.value = text; ask(text); };
+    box.appendChild(b);
+  });
+}
+
+/* ---------- 시작 ---------- */
+setupChat();
+renderFilters();
+load();
+setInterval(load, 2000);
+</script>
+</body>
+</html>

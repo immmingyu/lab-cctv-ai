@@ -1,0 +1,9 @@
+# PyTorch는 GPU(CUDA) 환경에 맞춰 따로 설치 (README 참고)
+opencv-python==5.0.0.93
+ultralytics==8.4.104
+lap
+fastapi==0.142.2
+uvicorn==0.54.0
+requests
+python-dotenv
+# anthropic   # Claude API로 전환할 때만 설치

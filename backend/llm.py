@@ -1,0 +1,277 @@
+import json
+import os
+import re                                  # ★ 추가
+from datetime import date, datetime, timedelta
+from collections import Counter
+
+import requests
+from dotenv import load_dotenv
+
+load_dotenv()
+
+PROVIDER = os.getenv("LLM_PROVIDER", "ollama")
+MODEL = os.getenv("LLM_MODEL", "exaone3.5:7.8b")
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+
+TYPE_KR = {
+    "fall_detection": "낙상 감지",
+    "restricted_area_intrusion": "제한 구역 접근",
+    "object_displacement": "물건 이동",
+}
+
+SUMMARY_SYSTEM_PROMPT = """너는 연구실 CCTV 관제 시스템의 상황 설명 담당이다.
+주어진 이벤트 데이터만 근거로 관리자에게 보낼 한국어 설명을 2~3문장으로 작성한다.
+규칙:
+- 데이터에 없는 사실(사람의 신원, 의도, 부상 정도 등)은 절대 추측하지 않는다.
+- 첫 문장: 언제, 어디서, 무슨 일이 감지되었는지.
+- 둘째 문장: 그렇게 판단한 근거(감지된 행동, 지속 시간 등).
+- 위험도가 HIGH이면 마지막에 필요한 조치를 짧게 권고한다.
+- 인사말, 머리말, 목록 기호 없이 문장만 출력한다."""
+
+CHAT_SYSTEM_PROMPT = """너는 연구실 CCTV 관제 시스템의 질의응답 담당이다.
+사용자 메시지에 포함된 이벤트 기록만 근거로 질문에 한국어로 답한다.
+규칙:
+- 기록에 없는 일은 '해당하는 기록이 없습니다'라고 답하고, 절대 지어내지 않는다.
+- [시스템 계산 결과]가 주어지면 그 범위와 건수를 그대로 따르고, 직접 다시 계산하지 않는다.
+- 시각과 숫자는 기록에 적힌 값만 사용한다.
+- 같은 종류의 이벤트가 여러 건이면 하나씩 나열하지 말고 묶어서 요약한다.
+  (예: 13시 37분부터 13시 46분 사이에 낙상 이벤트 8건)
+- 사람의 신원이나 의도는 추측하지 않는다.
+- 마크다운 기호(**, -, # 등)나 목록을 쓰지 않고 일반 문장으로 3~5문장 이내로 답한다."""
+
+
+# ---------- 공통: 시각 포맷 ----------
+def _parse_dt(value):
+    try:
+        return datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+
+def _format_time(ts):
+    d = _parse_dt(ts)
+    return f"{d.month}월 {d.day}일 {d.hour}시 {d.minute}분 {d.second}초" if d else ts
+
+def _event_time(e):
+    """timestamp에 날짜가 없던 예전 데이터는 서버 수신 시각(created_at)으로 대체."""
+    d = _parse_dt(e.get("timestamp")) or _parse_dt(e.get("created_at"))
+    return f"{d.hour}시 {d.minute}분 {d.second}초" if d else str(e.get("timestamp"))
+
+
+# ---------- 공통: LLM 호출 ----------
+def _call_ollama(system, user):
+    res = requests.post(
+        f"{OLLAMA_URL}/api/chat",
+        json={
+            "model": MODEL,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "stream": False,
+            "options": {
+                "temperature": 0.3,
+                "num_ctx": 8192,   # 이벤트 목록이 길어도 잘리지 않게 입력 길이 한도를 늘림
+            },
+            "keep_alive": "30m",
+        },
+        timeout=120,
+    )
+    res.raise_for_status()
+    return res.json()["message"]["content"].strip()
+
+def _call_anthropic(system, user, max_tokens):
+    import anthropic  # Claude로 전환했을 때만 필요
+    client = anthropic.Anthropic()
+    resp = client.messages.create(
+        model=MODEL,
+        max_tokens=max_tokens,
+        system=system,
+        messages=[{"role": "user", "content": user}],
+    )
+    return resp.content[0].text.strip()
+
+def call_llm(system, user, max_tokens=300):
+    if PROVIDER == "anthropic":
+        return _call_anthropic(system, user, max_tokens)
+    return _call_ollama(system, user)
+
+
+# ---------- 1) 이벤트 요약 ----------
+def build_summary_prompt(event):
+    facts = {
+        "이벤트 종류": TYPE_KR.get(event.get("event_type"), event.get("event_type")),
+        "감지 시각": _format_time(event.get("timestamp")),
+        "대상": event.get("object"),
+        "위치": event.get("location"),
+        "감지된 행동": event.get("action"),
+        "판단": event.get("judgment"),
+        "위험도": event.get("risk"),
+        "신뢰도": event.get("confidence"),
+        "지속 시간(초)": event.get("duration_seconds"),
+        "규칙 기반 요약": event.get("summary"),
+    }
+    return "다음 이벤트를 설명해줘:\n" + json.dumps(facts, ensure_ascii=False, indent=2)
+
+def generate_summary(event):
+    """실패하면 None을 반환. 이 경우 대시보드에는 규칙 기반 summary만 표시됨."""
+    try:
+        return call_llm(SUMMARY_SYSTEM_PROMPT, build_summary_prompt(event))
+    except Exception as e:
+        print(f"[LLM] 요약 생성 실패 ({PROVIDER}/{MODEL}): {e}")
+        return None
+
+
+# ---------- 2) 자연어 질문 ----------
+TIME_PATTERN = re.compile(r"(오전|오후|아침|저녁|밤|새벽)?\s*(\d{1,2})\s*시(?!간)\s*(?:(\d{1,2})\s*분|(반))?")
+CLOCK_PATTERN = re.compile(r"(\d{1,2}):(\d{2})")
+RELATIVE_PATTERN = re.compile(r"(\d+)\s*(시간|분)\s*(?:동안|이내|사이|전부터|전)")
+MONTH_DAY_PATTERN = re.compile(r"(\d{1,2})\s*월\s*(\d{1,2})\s*일")
+DAYS_AGO_PATTERN = re.compile(r"(\d+)\s*일\s*전")
+
+
+def _event_dt(e):
+    return _parse_dt(e.get("timestamp")) or _parse_dt(e.get("created_at"))
+
+
+def _kind(e):
+    return TYPE_KR.get(e.get("event_type"), e.get("event_type"))
+
+
+def extract_date(question, now):
+    """질문에서 날짜를 찾아 (날짜, 표시용 이름)을 반환. 없으면 오늘."""
+    today = now.date()
+
+    m = MONTH_DAY_PATTERN.search(question)
+    if m:
+        try:
+            d = date(today.year, int(m.group(1)), int(m.group(2)))
+            if d > today:                      # 미래 날짜면 작년으로 해석
+                d = d.replace(year=d.year - 1)
+            return d, f"{d.month}월 {d.day}일"
+        except ValueError:
+            pass                               # "13월 40일" 같은 잘못된 날짜는 무시
+
+    m = DAYS_AGO_PATTERN.search(question)
+    if m:
+        n = int(m.group(1))
+        d = today - timedelta(days=n)
+        return d, f"{n}일 전({d.month}월 {d.day}일)"
+
+    if "그저께" in question or "그제" in question:
+        d = today - timedelta(days=2)
+        return d, f"그저께({d.month}월 {d.day}일)"
+    if "어제" in question:
+        d = today - timedelta(days=1)
+        return d, f"어제({d.month}월 {d.day}일)"
+
+    return today, "오늘"
+
+
+def extract_relative(question):
+    """'1시간 동안' -> (timedelta(hours=1), '1시간'). 없으면 None."""
+    m = RELATIVE_PATTERN.search(question)
+    if not m:
+        return None
+    n, unit = int(m.group(1)), m.group(2)
+    delta = timedelta(hours=n) if unit == "시간" else timedelta(minutes=n)
+    return delta, f"{n}{unit}"
+
+
+def extract_time(question, now, day):
+    """질문에서 시각을 찾아 (기준 시각, 허용 범위(분))을 반환. 날짜는 day 기준."""
+    m = CLOCK_PATTERN.search(question)
+    if m:
+        period, h, mi, window = None, int(m.group(1)), int(m.group(2)), 15
+    else:
+        m = TIME_PATTERN.search(question)
+        if not m:
+            return None
+        period, h = m.group(1), int(m.group(2))
+        if m.group(3):
+            mi, window = int(m.group(3)), 15
+        elif m.group(4):
+            mi, window = 30, 15
+        else:
+            mi, window = 0, 30
+
+    if h > 23 or mi > 59:
+        return None
+
+    base = datetime.combine(day, datetime.min.time())  # ★ 오늘이 아니라 질문한 날짜 기준
+
+    if period in ("오후", "저녁", "밤") and h < 12:
+        h += 12
+    elif period in ("오전", "아침", "새벽") and h == 12:
+        h = 0
+    elif period is None and h < 12:
+        am = base.replace(hour=h, minute=mi)
+        pm = am + timedelta(hours=12)
+        return (pm if pm <= now else am), window
+
+    return base.replace(hour=h, minute=mi), window
+
+
+def _event_line(i, e):
+    desc = e.get("llm_summary") or e.get("summary")
+    return (f"{i}. [{_event_time(e)}] {_kind(e)} / 대상: {e.get('object')} / "
+            f"위험도: {e.get('risk')} / 지속 {e.get('duration_seconds')}초 / 내용: {desc}")
+
+
+def _count_text(events):
+    counts = Counter(_kind(e) for e in events)
+    return ", ".join(f"{k} {v}건" for k, v in counts.items())
+
+
+def _fallback_answer(events):
+    items = [f"{_event_time(e)} {_kind(e)}({e.get('risk')})" for e in events]
+    return (f"AI 응답을 생성하지 못해 기록만 보여드립니다. {len(events)}건의 이벤트가 있었습니다: "
+            + ", ".join(items))
+
+
+def answer_question(question, events, day=None, day_label="오늘"):
+    """events: app.py가 날짜(또는 최근 N시간) 기준으로 이미 골라서 넘겨준 기록."""
+    now = datetime.now()
+    day = day or now.date()
+    rel = extract_relative(question)
+
+    if not events:
+        if rel:
+            return f"최근 {rel[1]} 동안 기록된 이벤트가 없습니다."
+        return f"{day_label} 기록된 이벤트가 없습니다."
+
+    target_events = events
+    scope = day_label
+
+    if rel:
+        delta, text = rel
+        start = now - delta
+        scope = f"최근 {text}({start.hour}시 {start.minute}분 ~ {now.hour}시 {now.minute}분)"
+        target_events = [e for e in events if _event_dt(e) and start <= _event_dt(e) <= now]
+        if not target_events:
+            return f"{scope} 동안 기록된 이벤트는 없습니다."
+    else:
+        found = extract_time(question, now, day)
+        if found:
+            target, window = found
+            scope = f"{day_label} {target.hour}시 {target.minute}분 전후 {window}분"
+            target_events = [e for e in events
+                             if _event_dt(e) and abs((_event_dt(e) - target).total_seconds()) <= window * 60]
+            if not target_events:
+                dated = [e for e in events if _event_dt(e)]
+                if not dated:
+                    return f"{scope} 동안 기록된 이벤트는 없습니다."
+                nearest = min(dated, key=lambda e: abs((_event_dt(e) - target).total_seconds()))
+                return (f"{scope} 동안 기록된 이벤트는 없습니다. "
+                        f"{day_label} 기록 중 가장 가까운 것은 {_event_time(nearest)}의 {_kind(nearest)} 이벤트입니다.")
+
+    lines = "\n".join(_event_line(i, e) for i, e in enumerate(target_events, 1))
+    user = (f"현재 시각: {now.month}월 {now.day}일 {now.hour}시 {now.minute}분\n\n"
+            f"이벤트 기록 (시간순):\n{lines}\n\n"
+            f"[시스템 계산 결과] 질문 범위: {scope}. "
+            f"이 범위의 이벤트는 총 {len(target_events)}건 ({_count_text(target_events)}).\n\n"
+            f"질문: {question}")
+    try:
+        return call_llm(CHAT_SYSTEM_PROMPT, user, max_tokens=500)
+    except Exception as e:
+        print(f"[LLM] 질문 응답 실패 ({PROVIDER}/{MODEL}): {e}")
+        return _fallback_answer(target_events)
