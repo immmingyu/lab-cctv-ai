@@ -9,10 +9,22 @@
 - 이벤트 스냅샷 + LLM 상황 설명 + 자연어 질문 대시보드
 
 ## 실행 방법
-1. 패키지 설치: `pip install -r requirements.txt` (PyTorch는 GPU 환경에 맞게 별도 설치)
-2. `.env.example`을 복사해 `.env`를 만들고 값 설정
-3. 로컬 LLM 사용 시 Ollama 설치 후 `ollama pull exaone3.5:7.8b`
-4. 프로젝트 최상위 폴더에서 실행
-   - 서버: `uvicorn backend.app:app --reload`
-   - AI: `python -m src.main`
-   - 대시보드: http://127.0.0.1:8000/
+
+### 1. 환경 만들기 (Python 3.12)
+- `conda create -n lab-cctv python=3.12 -y`
+- `conda activate lab-cctv`
+- **PyTorch GPU 버전으로 설치** (PyTorch 공식 홈페이지에서 본인 CUDA 버전 확인)
+  - 예: `python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121`
+- `python -m pip install -r requirements.txt`
+- CUDA 인식 확인: `python -c "import torch; print(torch.cuda.is_available())"` -> `True` 출력 확인
+
+### 2. 환경 변수 설정
+- `.env.example`을 복사하여 `.env`를 만들고 값 설정
+
+### 3. 로컬 LLM 사용 시
+- Ollama 설치 후: `ollama pull exaone3.5:7.8b`
+
+### 4. 프로젝트 루트 폴더에서 실행
+- **서버:** `uvicorn backend.app:app --reload`
+- **AI:** `python -m src.main`
+- **대시보드:** `http://127.0.0.1:8000/`
