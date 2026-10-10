@@ -1,0 +1,6 @@
+단계,장치,평균 ms,환산 FPS
+카메라 프레임 수신,-,39.1,25.6
+Pose (yolov8n-pose),CPU,49.5,20.2
+Pose (yolov8n-pose),GPU,16.0,62.4
+물건 검출 (yolov8s),CPU,84.9,11.8
+물건 검출 (yolov8s),GPU,12.3,81.3
