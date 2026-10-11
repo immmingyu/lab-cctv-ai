@@ -11,7 +11,7 @@ plt.rcParams["font.family"] = "Malgun Gothic"   # Mac에서는 "AppleGothic"
 plt.rcParams["axes.unicode_minus"] = False
 
 ROWS = [("stand", "서기"), ("sit", "앉기"), ("bend", "숙이기"),
-        ("lie_side", "눕기 (옆)"), ("lie_front", "눕기 (카메라 방향)")]
+        ("lie_side", "눕기 (옆)"), ("lie_front", "눕기 (카메라와 일직선)")]
 COLS = [("standing", "서 있음"), ("lying", "누움"), ("other", "판단 불가")]
 METHODS = [("bbox_pred", "박스 비율 (기존)"), ("pose_pred", "Pose 각도"),
            ("smooth_pred", "Pose + 스무딩 (현재)")]
