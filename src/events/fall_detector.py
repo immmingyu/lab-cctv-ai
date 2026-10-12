@@ -92,15 +92,17 @@ class FallDetector:
             if state["lying_since"] is None:
                 state["lying_since"] = now
             duration = now - state["lying_since"]
-        elif state["lying_since"] is not None:
-            # 일어났다고 바로 사건을 끝내지 않고, recovery_seconds 동안 계속 서 있는지 확인
-            if state["standing_since"] is None:
-                state["standing_since"] = now
-            if now - state["standing_since"] >= self.recovery_seconds:
-                state["lying_since"] = None
-                state["standing_since"] = None
-                state["notified_medium"] = False
-                state["notified_high"] = False
+        else:
+            # ★ 누운 시간은 '연속'일 때만 셈 (숙이기를 반복해도 시간이 쌓이지 않게)
+            state["lying_since"] = None
+            # 경보가 울린 사건은 recovery_seconds 이상 서 있어야 종료 (같은 낙상 중복 경보 방지)
+            if state["notified_medium"] or state["notified_high"]:
+                if state["standing_since"] is None:
+                    state["standing_since"] = now
+                if now - state["standing_since"] >= self.recovery_seconds:
+                    state["standing_since"] = None
+                    state["notified_medium"] = False
+                    state["notified_high"] = False
 
         if duration >= self.high_risk_seconds:
             risk = "HIGH"
