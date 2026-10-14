@@ -16,10 +16,8 @@ plt.rcParams["axes.unicode_minus"] = False
 
 ACTIVITIES = [("stand", "서기"), ("sit", "앉기"), ("bend", "숙이기"),
               ("lie_side", "눕기 (옆)"), ("lie_front", "눕기\n(카메라와 일직선)")]
-METHODS = [("frame", "프레임 단위 즉시 판단", "#ef4444"),
-           ("duration", "지속시간 판단 (스무딩 없음)", "#f59e0b"),
-           ("current", "스무딩 + 지속시간 (기존)", "#94a3b8"),
-           ("improved", "스무딩 + 연속 지속시간 (개선)", "#3b82f6")]
+METHODS = [("frame", "프레임 단위 판단", "#ef4444"),
+           ("improved", "시간 흐름 판단 (현재)", "#3b82f6")]
 
 
 def load(path):
