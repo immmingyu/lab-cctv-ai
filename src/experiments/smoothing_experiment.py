@@ -49,7 +49,7 @@ def bbox_area(p):
 
 def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    cap = open_source(0)
+    cap = open_source()
     pose_estimator = PoseEstimator()
     smoothed_detector = FallDetector()        # 현재 방식
     baseline_detector = BaselineFallDetector()  # 예전 방식

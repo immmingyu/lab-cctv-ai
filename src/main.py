@@ -19,8 +19,8 @@ from src.schemas.event_schema import (
     create_intrusion_event,
 )
 
-LOG_PATH = "data/tracking_log.csv"
-EVENT_LOG_PATH = "data/events.jsonl"
+LOG_PATH = "data/tracking_log.csv"  
+EVENT_LOG_PATH = "data/events.jsonl"    
 SNAPSHOT_DIR = Path("data/snapshots")
 CAPTURE_DIR = Path("data/captures")
 

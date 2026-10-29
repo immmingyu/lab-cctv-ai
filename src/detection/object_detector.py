@@ -1,4 +1,5 @@
 from ultralytics import YOLO
+from src.config import YOLO_DEVICE
 
 class ObjectDetector:
     def __init__(self, target_classes, model_path="yolov8s.pt",
@@ -18,7 +19,7 @@ class ObjectDetector:
         # ※ 중요: YOLO 자체 기본 기준이 0.25라서, 그보다 낮은 기준을 쓰려면
         #   모델 호출 시 conf를 가장 낮은 값으로 내려놔야 함
         min_conf = min([self.default_conf] + list(self.conf_thresholds.values()))
-        results = self.model(frame, conf=min_conf, verbose=False)[0]
+        results = self.model(frame, conf=min_conf, verbose=False, device=YOLO_DEVICE)[0]
 
         found = {cls: None for cls in self.target_classes}
         best_conf = {cls: 0.0 for cls in self.target_classes}

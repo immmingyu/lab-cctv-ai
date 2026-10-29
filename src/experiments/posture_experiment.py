@@ -46,7 +46,7 @@ def bbox_area(p):
 
 def main():
     OUT_CSV.parent.mkdir(parents=True, exist_ok=True)
-    cap = open_source(0)
+    cap = open_source()
     pose_estimator = PoseEstimator()
     fall_detector = FallDetector()
 

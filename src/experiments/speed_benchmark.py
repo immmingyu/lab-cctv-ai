@@ -30,7 +30,7 @@ def main():
           torch.cuda.get_device_name(0) if torch.cuda.is_available() else "")
 
     # 1) 카메라가 실제로 주는 FPS
-    cap = open_source(0)
+    cap = open_source()
     frames = []
     start = time.perf_counter()
     while len(frames) < N_FRAMES:

@@ -4,7 +4,7 @@ from src.capture.camera import open_source, read_frame
 
 def main():
     model = YOLO("yolov8n.pt")
-    cap = open_source(0)
+    cap = open_source()
 
     while True:
         ret, frame = read_frame(cap, mirror=True)

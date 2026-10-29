@@ -1,4 +1,5 @@
 from ultralytics import YOLO
+from src.config import YOLO_DEVICE
 
 class PoseEstimator:
     def __init__(self, model_path="yolov8n-pose.pt", conf_threshold=0.5):
@@ -19,7 +20,7 @@ class PoseEstimator:
             ...
         ]
         """
-        results = self.model.track(frame, persist=True, verbose=False)[0]
+        results = self.model.track(frame, persist=True, verbose=False, device=YOLO_DEVICE)[0]
 
         people = []
         if results.boxes.id is None:

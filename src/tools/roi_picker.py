@@ -6,7 +6,7 @@ def on_mouse_click(event, x, y, flags, param):
         print(f"클릭한 좌표: ({x}, {y})")
 
 def main():
-    cap = open_source(0)
+    cap = open_source()
     cv2.namedWindow("ROI Picker")
     cv2.setMouseCallback("ROI Picker", on_mouse_click)
 
