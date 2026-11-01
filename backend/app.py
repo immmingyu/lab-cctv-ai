@@ -9,7 +9,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from backend.db import get_conn, init_db
-from backend.llm import MODEL, PROVIDER, answer_question, extract_date, extract_relative, generate_summary
+from backend.llm import MODEL, PROVIDER, generate_summary
+from backend import chat_service
 
 app = FastAPI(title="Lab CCTV Backend")
 init_db()
@@ -100,9 +101,7 @@ def list_events(event_type: Optional[str] = None, limit: int = 50):
 
 @app.post("/chat")
 def chat(req: ChatIn):
-    now = datetime.now()
-    day, day_label = extract_date(req.question, now)
-    rel = extract_relative(req.question)
+    return chat_service.chat(req.question)
 
     with get_conn() as conn:
         if rel:

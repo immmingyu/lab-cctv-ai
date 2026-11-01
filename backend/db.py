@@ -3,14 +3,18 @@ from pathlib import Path
 
 DB_PATH = Path("data/events.db")
 
-def get_conn():
-    conn = sqlite3.connect(DB_PATH)
+
+def get_conn(db_path=None):
+    """db_path를 안 주면 운영 DB(data/events.db) 사용. 평가 때는 평가용 DB 경로를 넘김."""
+    conn = sqlite3.connect(db_path or DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
-def init_db():
-    DB_PATH.parent.mkdir(exist_ok=True)
-    with get_conn() as conn:
+
+def init_db(db_path=None):
+    path = Path(db_path) if db_path else DB_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with get_conn(path) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,7 +34,6 @@ def init_db():
                 llm_summary TEXT
             )
         """)
-        # 예전에 만든 DB에는 llm_summary 칸이 없으므로 있으면 건너뛰고, 없으면 추가
         cols = [r["name"] for r in conn.execute("PRAGMA table_info(events)")]
         if "llm_summary" not in cols:
             conn.execute("ALTER TABLE events ADD COLUMN llm_summary TEXT")

@@ -1,8 +1,8 @@
 import json
 import os
-import re                                  # ★ 추가
-from datetime import date, datetime, timedelta
+import re
 from collections import Counter
+from datetime import date, datetime, timedelta
 
 import requests
 from dotenv import load_dotenv
@@ -47,9 +47,11 @@ def _parse_dt(value):
     except (TypeError, ValueError):
         return None
 
+
 def _format_time(ts):
     d = _parse_dt(ts)
     return f"{d.month}월 {d.day}일 {d.hour}시 {d.minute}분 {d.second}초" if d else ts
+
 
 def _event_time(e):
     """timestamp에 날짜가 없던 예전 데이터는 서버 수신 시각(created_at)으로 대체."""
@@ -79,6 +81,7 @@ def _call_ollama(system, user):
     res.raise_for_status()
     return res.json()["message"]["content"].strip()
 
+
 def _call_anthropic(system, user, max_tokens):
     import anthropic  # Claude로 전환했을 때만 필요
     client = anthropic.Anthropic()
@@ -89,6 +92,7 @@ def _call_anthropic(system, user, max_tokens):
         messages=[{"role": "user", "content": user}],
     )
     return resp.content[0].text.strip()
+
 
 def call_llm(system, user, max_tokens=300):
     if PROVIDER == "anthropic":
@@ -112,6 +116,7 @@ def build_summary_prompt(event):
     }
     return "다음 이벤트를 설명해줘:\n" + json.dumps(facts, ensure_ascii=False, indent=2)
 
+
 def generate_summary(event):
     """실패하면 None을 반환. 이 경우 대시보드에는 규칙 기반 summary만 표시됨."""
     try:
@@ -131,6 +136,12 @@ DAYS_AGO_PATTERN = re.compile(r"(\d+)\s*일\s*전")
 
 def _event_dt(e):
     return _parse_dt(e.get("timestamp")) or _parse_dt(e.get("created_at"))
+
+
+def _event_dt_text(e):
+    """★ 날짜까지 포함한 시각 표시 (계산 결과를 빼는 비교 조건에서 사용)."""
+    d = _event_dt(e)
+    return f"{d.month}월 {d.day}일 {d.hour}시 {d.minute}분 {d.second}초" if d else str(e.get("timestamp"))
 
 
 def _kind(e):
@@ -197,7 +208,7 @@ def extract_time(question, now, day):
     if h > 23 or mi > 59:
         return None
 
-    base = datetime.combine(day, datetime.min.time())  # ★ 오늘이 아니라 질문한 날짜 기준
+    base = datetime.combine(day, datetime.min.time())  # 오늘이 아니라 질문한 날짜 기준
 
     if period in ("오후", "저녁", "밤") and h < 12:
         h += 12
@@ -211,9 +222,11 @@ def extract_time(question, now, day):
     return base.replace(hour=h, minute=mi), window
 
 
-def _event_line(i, e):
+def _event_line(i, e, with_date=False):
+    """★ with_date=True면 날짜까지 표시."""
     desc = e.get("llm_summary") or e.get("summary")
-    return (f"{i}. [{_event_time(e)}] {_kind(e)} / 대상: {e.get('object')} / "
+    when = _event_dt_text(e) if with_date else _event_time(e)
+    return (f"{i}. [{when}] {_kind(e)} / 대상: {e.get('object')} / "
             f"위험도: {e.get('risk')} / 지속 {e.get('duration_seconds')}초 / 내용: {desc}")
 
 
@@ -228,9 +241,12 @@ def _fallback_answer(events):
             + ", ".join(items))
 
 
-def answer_question(question, events, day=None, day_label="오늘"):
-    """events: app.py가 날짜(또는 최근 N시간) 기준으로 이미 골라서 넘겨준 기록."""
-    now = datetime.now()
+def answer_question(question, events, day=None, day_label="오늘", now=None):
+    """
+    events: 날짜(또는 최근 N시간) 기준으로 이미 골라서 넘겨준 기록.
+    ★ now: 기준 시각. 안 넘기면 현재 시각, 평가 때는 고정된 시각을 넘김.
+    """
+    now = now or datetime.now()
     day = day or now.date()
     rel = extract_relative(question)
 
@@ -275,3 +291,24 @@ def answer_question(question, events, day=None, day_label="오늘"):
     except Exception as e:
         print(f"[LLM] 질문 응답 실패 ({PROVIDER}/{MODEL}): {e}")
         return _fallback_answer(target_events)
+
+
+# ---------- 3) 평가용 비교 조건 ----------
+def answer_question_ungrounded(question, events, now=None):
+    """
+    ★ 평가용 비교 조건: 코드가 날짜, 시간 범위, 건수를 계산하지 않고
+    전체 기록을 날짜와 함께 LLM에게 그대로 넘겨서 LLM이 알아서 답하게 함.
+    (실제 시스템에서는 사용하지 않음)
+    """
+    now = now or datetime.now()
+    if not events:
+        return "기록된 이벤트가 없습니다."
+    lines = "\n".join(_event_line(i, e, with_date=True) for i, e in enumerate(events, 1))
+    user = (f"현재 시각: {now.year}년 {now.month}월 {now.day}일 {now.hour}시 {now.minute}분\n\n"
+            f"이벤트 기록 (시간순):\n{lines}\n\n"
+            f"질문: {question}")
+    try:
+        return call_llm(CHAT_SYSTEM_PROMPT, user, max_tokens=500)
+    except Exception as e:
+        print(f"[LLM] 질문 응답 실패 ({PROVIDER}/{MODEL}): {e}")
+        return None
