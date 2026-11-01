@@ -54,13 +54,19 @@ def create_intrusion_event(track_id, duration, confidence=0.9):
         "summary": f"제한 구역에 {duration}초간 머무름이 확인됨",
     }
 
-def create_displacement_event(object_class, duration, confidence=0.85):
-    """
-    문서 6.9 Event JSON 형식에 맞춘 물건 이동 이벤트 생성.
-    """
+def create_displacement_event(object_class, duration, confidence=0.85, reason="moved"):
+    """물건 이동 이벤트. reason: 'moved'(다른 위치에서 확인) 또는 'missing'(원래 위치에서 사라짐)."""
     now = datetime.now().isoformat(timespec="seconds")
-
     object_name_kr = {"laptop": "노트북", "book": "책"}.get(object_class, object_class)
+
+    if reason == "missing":
+        action = ["disappeared_from_original_position"]
+        judgment = "object_missing"
+        summary = f"{object_name_kr}이(가) 원래 위치에서 {duration}초 이상 보이지 않음 (이동 또는 가려짐)"
+    else:
+        action = ["moved_from_original_position"]
+        judgment = "displacement_confirmed"
+        summary = f"{object_name_kr}이(가) 원래 위치에서 {duration}초간 벗어난 상태로 확인됨"
 
     return {
         "event_id": _next_event_id(),
@@ -68,10 +74,10 @@ def create_displacement_event(object_class, duration, confidence=0.85):
         "timestamp": now,
         "object": object_name_kr,
         "location": "연구실 책상",
-        "action": ["moved_from_original_position"],
-        "judgment": "displacement_confirmed",
-        "risk": "LOW",  # 물건 이동 자체는 낙상보다 긴급도가 낮음
+        "action": action,
+        "judgment": judgment,
+        "risk": "LOW",
         "confidence": confidence,
         "duration_seconds": duration,
-        "summary": f"{object_name_kr}이(가) 원래 위치에서 {duration}초간 벗어난 상태로 확인됨",
+        "summary": summary,
     }

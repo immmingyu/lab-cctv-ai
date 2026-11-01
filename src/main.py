@@ -94,6 +94,15 @@ def draw_objects(frame, detections, displacement_result):
         cv2.putText(frame, f"{cls} [{status}]", (x1, y1 - 8),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
+    # ★ 안 보이는 물건은 박스가 없으니 화면 왼쪽 위에 따로 표시
+    if not displacement_result["calibrating"]:
+        y = 60
+        for cls, r in displacement_result["results"].items():
+            if r.get("status") == "missing":
+                cv2.putText(frame, f"{cls}: MISSING ({r.get('duration', 0)}s)", (10, y),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                y += 25
+
 
 def main():
     args = parse_args()
@@ -131,7 +140,7 @@ def main():
             if not displacement_result["calibrating"]:
                 for cls, r in displacement_result["results"].items():
                     if r.get("new_event"):
-                        pending_events.append(create_displacement_event(cls, r["duration"]))
+                        pending_events.append(create_displacement_event(cls, r["duration"], reason=r["status"]))
 
         # --- 사람 (낙상 / 제한 구역) ---
         people = pose_estimator.estimate(frame) if pose_estimator else []
