@@ -18,3 +18,5 @@ data/sample_videos/*.mp4
 
 # 에디터 설정
 .vscode/
+
+data/recordings/
