@@ -102,6 +102,10 @@ def draw_objects(frame, detections, displacement_result):
                 cv2.putText(frame, f"{cls}: MISSING ({r.get('duration', 0)}s)", (10, y),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
                 y += 25
+            elif r.get("status") == "occluded":
+                cv2.putText(frame, f"{cls}: HIDDEN BY PERSON", (10, y),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
+                y += 25
 
 
 def main():
@@ -134,8 +138,9 @@ def main():
 
         # --- 물건 이동 ---
         if show_object:
-            obj_detections = object_detector.detect(frame)
-            displacement_result = displacement_detector.update(obj_detections)
+            # 같은 YOLO 결과의 사람 박스도 넘겨서, 사람이 가리는 동안은 사라짐으로 세지 않게 함
+            obj_detections, person_boxes = object_detector.detect_all(frame)
+            displacement_result = displacement_detector.update(obj_detections, person_boxes=person_boxes)
             draw_objects(frame, obj_detections, displacement_result)
             if not displacement_result["calibrating"]:
                 for cls, r in displacement_result["results"].items():

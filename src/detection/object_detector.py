@@ -3,19 +3,29 @@ from src.config import YOLO_DEVICE
 
 class ObjectDetector:
     def __init__(self, target_classes, model_path="yolov8s.pt",
-                 conf_thresholds=None, default_conf=0.4):
+                 conf_thresholds=None, default_conf=0.4, person_conf=0.4):
         """
         conf_thresholds: 물건별 확신도 기준. 예: {"book": 0.15}
         지정 안 한 물건은 default_conf 사용.
         model_path: 물건 검출은 yolov8s(small)로 변경 - 작은 물건 인식이 n보다 낫고,
                     RTX 3060이면 속도 부담 거의 없음.
+        person_conf: detect_all()에서 사람 박스로 인정할 확신도 기준
         """
         self.model = YOLO(model_path)
         self.target_classes = target_classes
         self.conf_thresholds = conf_thresholds or {}
         self.default_conf = default_conf
+        self.person_conf = person_conf
 
     def detect(self, frame):
+        """물건만 필요할 때. 반환값: {"book": bbox 또는 None, ...}"""
+        return self.detect_all(frame)[0]
+
+    def detect_all(self, frame):
+        """
+        같은 YOLO 결과에서 물건과 사람 박스를 함께 꺼냄 (모델 추가 없음).
+        반환값: ({"book": bbox 또는 None, ...}, [사람 bbox, ...])
+        """
         # ※ 중요: YOLO 자체 기본 기준이 0.25라서, 그보다 낮은 기준을 쓰려면
         #   모델 호출 시 conf를 가장 낮은 값으로 내려놔야 함
         min_conf = min([self.default_conf] + list(self.conf_thresholds.values()))
@@ -23,9 +33,14 @@ class ObjectDetector:
 
         found = {cls: None for cls in self.target_classes}
         best_conf = {cls: 0.0 for cls in self.target_classes}
+        persons = []
 
         for box in results.boxes:
             class_name = self.model.names[int(box.cls[0])]
+            if class_name == "person":
+                if float(box.conf[0]) >= self.person_conf:
+                    persons.append(tuple(map(int, box.xyxy[0])))
+                continue
             if class_name not in self.target_classes:
                 continue
 
@@ -39,4 +54,4 @@ class ObjectDetector:
                 found[class_name] = (x1, y1, x2, y2)
                 best_conf[class_name] = conf
 
-        return found
+        return found, persons

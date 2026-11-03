@@ -28,6 +28,7 @@ OBJECT_VARIANTS = {
     "예전 (이동만)": dict(missing_confirm_seconds=math.inf),
     "새 로직 (사라짐 4초)": dict(missing_confirm_seconds=4),
     "새 로직 (사라짐 6초)": dict(missing_confirm_seconds=6),
+    "고친 로직 (사람 가림 고려, 4초)": dict(missing_confirm_seconds=4, use_person_boxes=True),
 }
 
 
@@ -68,12 +69,17 @@ def frames(cap, times, mirror):
 
 def run_object(cap, times, mirror):
     detector = ObjectDetector(TARGET_OBJECTS, conf_thresholds={"book": 0.15})
-    variants = {name: ObjectDisplacementDetector(TARGET_OBJECTS, **kw) for name, kw in OBJECT_VARIANTS.items()}
+    variants, use_persons = {}, set()
+    for name, kw in OBJECT_VARIANTS.items():
+        kw = dict(kw)
+        if kw.pop("use_person_boxes", False):
+            use_persons.add(name)
+        variants[name] = ObjectDisplacementDetector(TARGET_OBJECTS, **kw)
     events = {name: [] for name in variants}
     for t, frame in frames(cap, times, mirror):
-        dets = detector.detect(frame)            # 검출은 한 번, 판단은 세 가지 로직에 동시에
+        dets, persons = detector.detect_all(frame)   # 검출은 한 번, 판단은 여러 로직에 동시에
         for name, det in variants.items():
-            res = det.update(dets, now=t)
+            res = det.update(dets, now=t, person_boxes=persons if name in use_persons else None)
             if res["calibrating"]:
                 continue
             for cls, r in res["results"].items():
