@@ -34,6 +34,28 @@ def create_fall_event(track_id, bbox, risk, duration, confidence):
         "summary": summary,
     }
 
+def create_vlm_fall_event(track_id, bbox, still_seconds, reason, confidence=0.7):
+    """
+    조건부 VLM 낙상 이벤트: 규칙(어깨-골반 각도)은 누움이 아니라고 했지만,
+    오래 움직임이 없어 VLM에게 물었더니 '누워 있다'고 답한 경우.
+    confidence: VLM은 확신도를 주지 않으므로 규칙(0.9)보다 낮은 고정값.
+    """
+    now = datetime.now().isoformat(timespec="seconds")
+
+    return {
+        "event_id": _next_event_id(),
+        "event_type": "fall_detection",
+        "timestamp": now,
+        "object": f"Person #{track_id:02d}",
+        "location": "연구실 Camera Area A",
+        "action": ["lying", "no_movement"],
+        "judgment": "fall_suspected_vlm",
+        "risk": "MEDIUM",
+        "confidence": confidence,
+        "duration_seconds": still_seconds,
+        "summary": f"{still_seconds}초간 움직임이 없어 영상 판단 모델(VLM)로 재확인한 결과 누워 있는 것으로 판단됨 (근거: {reason})",
+    }
+
 def create_intrusion_event(track_id, duration, confidence=0.9):
     """
     문서 6.9 Event JSON 형식에 맞춘 제한구역 접근 이벤트 생성.

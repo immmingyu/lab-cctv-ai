@@ -1,6 +1,7 @@
 import argparse
 import csv
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -9,14 +10,17 @@ import cv2
 from src.capture.camera import open_source, read_frame
 from src.detection.object_detector import ObjectDetector
 from src.detection.pose_estimator import PoseEstimator
+from src.detection.vlm_client import VlmClient, crop_person
 from src.events.event_sender import EventSender
 from src.events.fall_detector import FallDetector
 from src.events.intrusion_detector import IntrusionDetector
 from src.events.object_displacement_detector import ObjectDisplacementDetector
+from src.events.stillness_trigger import StillnessTrigger
 from src.schemas.event_schema import (
     create_displacement_event,
     create_fall_event,
     create_intrusion_event,
+    create_vlm_fall_event,
 )
 
 LOG_PATH = "data/tracking_log.csv"  
@@ -38,6 +42,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="연구실 지능형 CCTV")
     parser.add_argument("--only", choices=["all", "fall", "intrusion", "object"], default="all",
                         help="한 기능만 화면에 표시하고 감지 (사진 촬영용)")
+    parser.add_argument("--no-vlm", action="store_true", help="조건부 VLM 재확인 끄기 (규칙만)")
     return parser.parse_args()
 
 
@@ -119,6 +124,12 @@ def main():
     cap = open_source()
     pose_estimator = PoseEstimator() if (show_fall or show_intrusion) else None
     fall_detector = FallDetector()
+    # 조건부 VLM: 오래 안 움직이는데 규칙이 누움이 아니라고 할 때만 물어봄 (별도 스레드, 영상 처리는 계속)
+    use_vlm = show_fall and not args.no_vlm
+    stillness = StillnessTrigger()
+    vlm = VlmClient() if use_vlm else None
+    vlm_pool = ThreadPoolExecutor(max_workers=1) if use_vlm else None
+    vlm_jobs = []   # [(future, track_id, bbox, 정지 시간)]
     intrusion_detector = IntrusionDetector(ROI_POINTS, stay_seconds_threshold=5)
     object_detector = ObjectDetector(TARGET_OBJECTS, conf_thresholds={"book": 0.15}) if show_object else None
     displacement_detector = ObjectDisplacementDetector(TARGET_OBJECTS) if show_object else None
@@ -131,6 +142,7 @@ def main():
             break
 
         pending_events = []  # 이번 프레임의 이벤트 (그리기가 끝난 뒤 스냅샷과 함께 저장)
+        raw_frame = frame.copy() if use_vlm else None   # VLM에 보낼 원본 (그림 없는 상태)
 
         # --- 제한 구역 표시 ---
         if show_intrusion:
@@ -183,6 +195,13 @@ def main():
                         track_id=track_id, bbox=(x1, y1, x2, y2),
                         risk=fall_status["new_event"], duration=duration, confidence=0.9,
                     ))
+
+                if use_vlm:
+                    st = stillness.update(track_id, keypoints, (x1, y1, x2, y2), posture)
+                    if st["ask"]:
+                        crop = crop_person(raw_frame, (x1, y1, x2, y2))   # 박스, 뼈대가 그려지기 전 원본에서 자름
+                        vlm_jobs.append((vlm_pool.submit(vlm.ask_lying, crop), track_id, (x1, y1, x2, y2), st["still"]))
+                        print(f"[VLM] ID {track_id} {st['still']}초 정지, 규칙={posture} -> 재확인 요청")
             else:
                 # 낙상 표시 없이 사람 박스와 ID만
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
@@ -202,6 +221,15 @@ def main():
                 if intrusion_status["new_event"]:
                     pending_events.append(create_intrusion_event(track_id, intrusion_status["duration"]))
 
+        # --- VLM 답이 온 것만 처리 (안 끝난 건 다음 프레임에서 다시 확인) ---
+        for job in [j for j in vlm_jobs if j[0].done()]:
+            vlm_jobs.remove(job)
+            future, track_id, bbox, still = job
+            ans = future.result()
+            print(f"[VLM] ID {track_id} 답: {ans}")
+            if ans["lying"]:
+                pending_events.append(create_vlm_fall_event(track_id, bbox, still, ans["reason"]))
+
         for ev in pending_events:
             save_event(ev, frame)
 
@@ -218,6 +246,8 @@ def main():
 
     cap.release()
     cv2.destroyAllWindows()
+    if vlm_pool:
+        vlm_pool.shutdown(wait=False, cancel_futures=True)
     sender.flush()
 
 

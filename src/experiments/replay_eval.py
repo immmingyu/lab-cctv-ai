@@ -7,9 +7,11 @@ import cv2
 
 from src.detection.object_detector import ObjectDetector
 from src.detection.pose_estimator import PoseEstimator
+from src.detection.vlm_client import VlmClient, crop_person
 from src.events.fall_detector import FallDetector
 from src.events.intrusion_detector import IntrusionDetector
 from src.events.object_displacement_detector import ObjectDisplacementDetector
+from src.events.stillness_trigger import StillnessTrigger
 
 TARGET_OBJECTS = ["laptop", "book"]
 EXPECTED = {"fall": "fall_detection", "intrusion": "restricted_area_intrusion",
@@ -88,11 +90,19 @@ def run_object(cap, times, mirror):
     return events
 
 
-def run_people(cap, times, mirror, roi):
+def run_people(cap, times, mirror, roi, use_vlm=False, vlm_calls=None):
+    """
+    use_vlm: True면 같은 Pose 결과로 '규칙만'과 '규칙 + VLM'을 함께 평가.
+             VLM은 영상 시각 기준으로 정지 조건을 보고, 호출하는 동안 재생을 멈추고 답을 기다림
+             (이벤트 시각 = 사진을 자른 프레임 시각, 실시간에서는 여기에 응답 시간만큼 늦어짐)
+    vlm_calls: VLM 호출 기록을 담을 목록
+    """
     pose = PoseEstimator()
     fall = FallDetector()
     intr = IntrusionDetector(roi, stay_seconds_threshold=5)
-    evs = []
+    stillness = StillnessTrigger() if use_vlm else None
+    vlm = VlmClient() if use_vlm else None
+    evs, vlm_evs = [], []
     for t, frame in frames(cap, times, mirror):
         for p in pose.estimate(frame):
             tid = p["track_id"]
@@ -103,7 +113,17 @@ def run_people(cap, times, mirror, roi):
             ist = intr.update(tid, intr.is_inside((int((x1 + x2) / 2), y2)), now=t)
             if ist["new_event"]:
                 evs.append({"t": t, "type": "restricted_area_intrusion", "detail": f"ID{tid}"})
-    return {"현재 시스템": evs}
+            if use_vlm:
+                st = stillness.update(tid, p["keypoints"], p["bbox"], fs["posture"], now=t)
+                if st["ask"]:
+                    ans = vlm.ask_lying(crop_person(frame, p["bbox"]))
+                    vlm_calls.append({"t": round(t, 1), "track_id": tid, "rule_posture": fs["posture"], **ans})
+                    print(f"  [VLM] {t:.1f}초 ID{tid} 규칙={fs['posture']} -> {ans}")
+                    if ans["lying"]:
+                        vlm_evs.append({"t": t, "type": "fall_detection", "detail": f"VLM ID{tid}"})
+    if not use_vlm:
+        return {"현재 시스템": evs}
+    return {"규칙만": evs, "규칙 + VLM": sorted(evs + vlm_evs, key=lambda e: e["t"])}
 
 
 def score(marks, events, groups, out_dir):
@@ -178,6 +198,7 @@ def main():
     ap.add_argument("--roi", default="", help="제한 구역 좌표 예: '178,395 185,475 311,478 318,407'")
     ap.add_argument("--groups", default="", help="시도 번호 그룹 예: 'desk=1-14 out=15-24'")
     ap.add_argument("--no-mirror", action="store_true", help="좌우 반전 끄기")
+    ap.add_argument("--vlm", action="store_true", help="people 작업: '규칙만' vs '규칙 + VLM' 비교 (로컬 Ollama 필요)")
     args = ap.parse_args()
 
     d = Path(args.rec_dir)
@@ -191,13 +212,25 @@ def main():
     else:
         if not args.roi:
             raise SystemExit("people 작업은 --roi 좌표가 필요합니다.")
-        events = run_people(cap, times, not args.no_mirror, parse_roi(args.roi))
+        vlm_calls = []
+        events = run_people(cap, times, not args.no_mirror, parse_roi(args.roi), args.vlm, vlm_calls)
     cap.release()
 
     # 녹화 폴더(data/recordings)는 건드리지 않도록 결과는 따로 저장
     out_dir = RESULT_DIR / d.name
     out_dir.mkdir(parents=True, exist_ok=True)
     score(marks, events, parse_groups(args.groups), out_dir)
+
+    if args.task == "people" and args.vlm:
+        print(f"\nVLM 호출 {len(vlm_calls)}회 ('예' {sum(c['lying'] is True for c in vlm_calls)}회, "
+              f"실패 {sum(c['lying'] is None for c in vlm_calls)}회)")
+        if vlm_calls:
+            print(f"  평균 응답 시간 {sum(c['latency'] for c in vlm_calls) / len(vlm_calls):.1f}초")
+            with open(out_dir / "vlm_calls.csv", "w", newline="", encoding="utf-8-sig") as f:
+                w = csv.DictWriter(f, fieldnames=list(vlm_calls[0].keys()))
+                w.writeheader()
+                w.writerows(vlm_calls)
+            print(f"VLM 호출 기록: {out_dir / 'vlm_calls.csv'}")
 
 
 if __name__ == "__main__":
