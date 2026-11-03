@@ -52,3 +52,14 @@
 재생 평가 (사람):
 `python -m src.experiments.replay_eval <녹화 폴더> --task people --vlm --roi "..." --groups "..."`
 결과는 `data/replay_results/`에 저장 (`data/recordings`는 읽기만).
+
+## LLM 답변 검증 (평가용)
+LLM 답변에서 시각과 건수를 뽑아 실제로 넘겨준 이벤트 기록과 대조한다. 맞지 않으면 한 번 다시 생성하고, 그래도 맞지 않으면 코드가 기록만으로 만든 목록 문장으로 대체한다. (`backend/verify.py`, 평가용 옵션이라 대시보드 기본값은 꺼짐)
+
+```
+python -m src.experiments.llm_eval.build_eval_db
+python -m src.experiments.llm_eval.run_eval --questions src/experiments/llm_eval/questions_test.json --verify
+python -m src.experiments.llm_eval.score_eval <run 폴더>   # 블라인드 채점 후
+python -m tests.test_verify                                 # 검증 장치 자체 테스트 (LLM 불필요)
+```
+`questions.json`(23개)은 문제를 찾아낸 개발용, `questions_test.json`(12개)은 검증 장치 비교용.

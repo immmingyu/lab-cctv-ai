@@ -241,22 +241,17 @@ def _fallback_answer(events):
             + ", ".join(items))
 
 
-def answer_question(question, events, day=None, day_label="오늘", now=None):
+def narrow_events(question, events, day, day_label, now):
     """
-    events: 날짜(또는 최근 N시간) 기준으로 이미 골라서 넘겨준 기록.
-    ★ now: 기준 시각. 안 넘기면 현재 시각, 평가 때는 고정된 시각을 넘김.
+    질문의 시간 범위를 코드로 좁힌다.
+    반환: (대상 이벤트, 범위 설명, LLM 없이 바로 답할 문장 또는 None)
     """
-    now = now or datetime.now()
-    day = day or now.date()
     rel = extract_relative(question)
 
     if not events:
         if rel:
-            return f"최근 {rel[1]} 동안 기록된 이벤트가 없습니다."
-        return f"{day_label} 기록된 이벤트가 없습니다."
-
-    target_events = events
-    scope = day_label
+            return [], f"최근 {rel[1]}", f"최근 {rel[1]} 동안 기록된 이벤트가 없습니다."
+        return [], day_label, f"{day_label} 기록된 이벤트가 없습니다."
 
     if rel:
         delta, text = rel
@@ -264,30 +259,67 @@ def answer_question(question, events, day=None, day_label="오늘", now=None):
         scope = f"최근 {text}({start.hour}시 {start.minute}분 ~ {now.hour}시 {now.minute}분)"
         target_events = [e for e in events if _event_dt(e) and start <= _event_dt(e) <= now]
         if not target_events:
-            return f"{scope} 동안 기록된 이벤트는 없습니다."
-    else:
-        found = extract_time(question, now, day)
-        if found:
-            target, window = found
-            scope = f"{day_label} {target.hour}시 {target.minute}분 전후 {window}분"
-            target_events = [e for e in events
-                             if _event_dt(e) and abs((_event_dt(e) - target).total_seconds()) <= window * 60]
-            if not target_events:
-                dated = [e for e in events if _event_dt(e)]
-                if not dated:
-                    return f"{scope} 동안 기록된 이벤트는 없습니다."
-                nearest = min(dated, key=lambda e: abs((_event_dt(e) - target).total_seconds()))
-                return (f"{scope} 동안 기록된 이벤트는 없습니다. "
-                        f"{day_label} 기록 중 가장 가까운 것은 {_event_time(nearest)}의 {_kind(nearest)} 이벤트입니다.")
+            return [], scope, f"{scope} 동안 기록된 이벤트는 없습니다."
+        return target_events, scope, None
 
+    found = extract_time(question, now, day)
+    if found:
+        target, window = found
+        scope = f"{day_label} {target.hour}시 {target.minute}분 전후 {window}분"
+        target_events = [e for e in events
+                         if _event_dt(e) and abs((_event_dt(e) - target).total_seconds()) <= window * 60]
+        if not target_events:
+            dated = [e for e in events if _event_dt(e)]
+            if not dated:
+                return [], scope, f"{scope} 동안 기록된 이벤트는 없습니다."
+            nearest = min(dated, key=lambda e: abs((_event_dt(e) - target).total_seconds()))
+            return [], scope, (f"{scope} 동안 기록된 이벤트는 없습니다. "
+                               f"{day_label} 기록 중 가장 가까운 것은 "
+                               f"{_event_time(nearest)}의 {_kind(nearest)} 이벤트입니다.")
+        return target_events, scope, None
+
+    return events, day_label, None
+
+
+def build_chat_prompt(question, target_events, scope, now):
     lines = "\n".join(_event_line(i, e) for i, e in enumerate(target_events, 1))
-    user = (f"현재 시각: {now.month}월 {now.day}일 {now.hour}시 {now.minute}분\n\n"
+    return (f"현재 시각: {now.month}월 {now.day}일 {now.hour}시 {now.minute}분\n\n"
             f"이벤트 기록 (시간순):\n{lines}\n\n"
             f"[시스템 계산 결과] 질문 범위: {scope}. "
             f"이 범위의 이벤트는 총 {len(target_events)}건 ({_count_text(target_events)}).\n\n"
             f"질문: {question}")
-    try:
+
+
+def answer_question(question, events, day=None, day_label="오늘", now=None,
+                    verify=False, verify_info=None):
+    """
+    events: 날짜(또는 최근 N시간) 기준으로 이미 골라서 넘겨준 기록.
+    ★ now: 기준 시각. 안 넘기면 현재 시각, 평가 때는 고정된 시각을 넘김.
+    ★ verify: True면 답변 속 시각/건수를 기록과 대조하고, 틀리면 한 번 다시 생성한다.
+      verify_info: 검증 과정(시도 횟수, 발견된 문제, 대체 여부)을 받아갈 dict.
+    """
+    now = now or datetime.now()
+    day = day or now.date()
+
+    target_events, scope, direct = narrow_events(question, events, day, day_label, now)
+    if direct is not None:
+        # 코드가 바로 답하는 경우라 검증할 것이 없음
+        if verify_info is not None:
+            verify_info.update({"attempts": 0, "problems": [], "replaced": False})
+        return direct
+
+    user = build_chat_prompt(question, target_events, scope, now)
+
+    def generate():
         return call_llm(CHAT_SYSTEM_PROMPT, user, max_tokens=500)
+
+    if verify:
+        from backend import verify as verifier   # 순환 import 방지를 위해 여기서 불러옴
+        return verifier.verified_answer(generate, question, target_events, scope, now,
+                                        info=verify_info)
+
+    try:
+        return generate()
     except Exception as e:
         print(f"[LLM] 질문 응답 실패 ({PROVIDER}/{MODEL}): {e}")
         return _fallback_answer(target_events)

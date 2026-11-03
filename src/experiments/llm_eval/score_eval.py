@@ -4,7 +4,12 @@ from collections import defaultdict
 from pathlib import Path
 
 SCORE = {"O": 1.0, "△": 0.5, "X": 0.0}
-NAMES = {"grounded": "계산 결과 넣음 (현재 설계)", "ungrounded": "계산 결과 뺌 (LLM이 계산)"}
+NAMES = {
+    "grounded": "계산 결과 넣음 (현재 설계)",
+    "ungrounded": "계산 결과 뺌 (LLM이 계산)",
+    "plain": "검증 없음",
+    "verified": "검증 있음 (시각·건수 대조 후 재생성)",
+}
 
 
 def read(path):
@@ -22,6 +27,9 @@ def main():
     sheet = read(d / args.sheet)
     key = {r["번호"]: r for r in read(d / "answer_key.csv")}
     raw = read(d / "raw.csv")
+
+    # 어떤 두 조건을 비교한 실행인지 answer_key에서 그대로 읽는다
+    conds = list(dict.fromkeys([r["A 조건"] for r in key.values()] + [r["B 조건"] for r in key.values()]))
 
     total = defaultdict(lambda: {"n": 0, "O": 0, "△": 0, "X": 0, "Y": 0, "score": 0.0})
     by_cat = defaultdict(lambda: defaultdict(lambda: [0, 0.0, 0]))  # [문항 수, 점수, 지어냄]
@@ -58,7 +66,7 @@ def main():
 
     print("\n===== 조건별 결과 =====")
     rows = []
-    for cond in ("grounded", "ungrounded"):
+    for cond in conds:
         t = total[cond]
         n = t["n"] or 1
         avg_lat = sum(latency[cond]) / max(len(latency[cond]), 1)
@@ -67,18 +75,23 @@ def main():
         print(f"  점수 {t['score']:.1f}/{t['n']}  ({t['score'] / n * 100:.1f}%, O=1, △=0.5, X=0)")
         print(f"  지어냄 {t['Y']}/{t['n']}  ({t['Y'] / n * 100:.1f}%)")
         print(f"  평균 응답 시간 {avg_lat:.1f}초, LLM 호출 {calls[cond]}/{len(latency[cond])}문항")
+        if cond == "verified":
+            retried = sum(1 for r in raw if r["조건"] == "verified" and r.get("검증 시도") == "2")
+            replaced = sum(1 for r in raw if r["조건"] == "verified" and r.get("기록 목록으로 대체") == "Y")
+            print(f"  검증이 문제를 찾아 다시 생성한 문항 {retried}개, 그중 기록 목록으로 대체 {replaced}개")
         rows.append([NAMES[cond], t["n"], t["O"], t["△"], t["X"],
                      round(t["score"] / n * 100, 1), t["Y"], round(t["Y"] / n * 100, 1),
                      round(avg_lat, 1), calls[cond]])
 
     print("\n===== 유형별 점수 (%) =====")
     cats = list(dict.fromkeys(r["유형"] for r in sheet))
-    print(f"{'유형':<10}{'계산 넣음':>10}{'계산 뺌':>10}")
+    print(f"{'유형':<10}" + "".join(f"{NAMES.get(c, c)[:10]:>12}" for c in conds))
     for c in cats:
-        g, u = by_cat["grounded"][c], by_cat["ungrounded"][c]
-        gp = g[1] / g[0] * 100 if g[0] else 0
-        up = u[1] / u[0] * 100 if u[0] else 0
-        print(f"{c:<10}{gp:>9.0f}%{up:>9.0f}%")
+        cells = ""
+        for cond in conds:
+            v = by_cat[cond][c]
+            cells += f"{(v[1] / v[0] * 100 if v[0] else 0):>11.0f}%"
+        print(f"{c:<10}{cells}")
 
     with open(d / "summary.csv", "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)

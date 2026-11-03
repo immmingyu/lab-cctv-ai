@@ -13,7 +13,8 @@ from src.experiments.llm_eval.build_eval_db import EVAL_DB, EVAL_NOW
 
 QUESTIONS = Path(__file__).with_name("questions.json")
 OUT_ROOT = Path("data/llm_eval")
-CONDITIONS = ("grounded", "ungrounded")   # 계산 결과 넣음 / 뺌
+CONDITIONS = ("grounded", "ungrounded")           # 계산 결과 넣음 / 뺌
+VERIFY_CONDITIONS = ("plain", "verified")         # --verify: 검증 없음 / 검증 있음
 
 # LLM이 실제로 호출됐는지 세기 위한 장치
 # (계산 결과를 넣는 조건은 "기록 없음"이면 LLM 없이 바로 답하기 때문)
@@ -40,13 +41,17 @@ def all_events_until(now):
 
 
 def run_condition(cond, question, all_events):
+    """조건 하나를 실행하고 (답변, 걸린 시간, LLM 호출 여부, 검증 기록)을 돌려준다."""
     _calls["n"] = 0
+    info = {"attempts": 0, "problems": [], "replaced": False}
     start = time.perf_counter()
-    if cond == "grounded":
-        answer = chat_service.chat(question, now=EVAL_NOW, db_path=EVAL_DB)["answer"]
-    else:
+    if cond == "ungrounded":
         answer = llm.answer_question_ungrounded(question, all_events, now=EVAL_NOW)
-    return answer or "(응답 실패)", round(time.perf_counter() - start, 2), _calls["n"] > 0
+    else:
+        # grounded / plain: 검증 없음, verified: 검증 있음
+        answer = chat_service.chat(question, now=EVAL_NOW, db_path=EVAL_DB,
+                                   verify=(cond == "verified"), verify_info=info)["answer"]
+    return answer or "(응답 실패)", round(time.perf_counter() - start, 2), _calls["n"] > 0, info
 
 
 def write_csv(path, header, rows):
@@ -60,19 +65,30 @@ def write_csv(path, header, rows):
 def main():
     parser = argparse.ArgumentParser(description="LLM 질의응답 정량 평가")
     parser.add_argument("--seed", type=int, default=42, help="A/B 순서 섞기용 시드")
+    parser.add_argument("--questions", default=str(QUESTIONS),
+                        help="질문 파일 경로 (기본: questions.json)")
+    parser.add_argument("--verify", action="store_true",
+                        help="'검증 없음 vs 검증 있음'을 비교 (기본은 '계산 결과 넣음 vs 뺌')")
     args = parser.parse_args()
+
+    conditions = VERIFY_CONDITIONS if args.verify else CONDITIONS
 
     if not EVAL_DB.exists():
         raise SystemExit("평가 DB가 없습니다. 먼저 build_eval_db를 실행하세요.")
 
-    questions = json.loads(QUESTIONS.read_text(encoding="utf-8"))
+    q_path = Path(args.questions)
+    if not q_path.exists():
+        raise SystemExit(f"질문 파일이 없습니다: {q_path}")
+    questions = json.loads(q_path.read_text(encoding="utf-8"))
     all_events = all_events_until(EVAL_NOW)
 
     model_tag = f"{llm.PROVIDER}_{llm.MODEL}".replace(":", "-").replace("/", "-")
-    out_dir = OUT_ROOT / f"run_{datetime.now():%Y%m%d_%H%M%S}_{model_tag}"
+    tag = "verify" if args.verify else "grounding"
+    out_dir = OUT_ROOT / f"run_{datetime.now():%Y%m%d_%H%M%S}_{tag}_{model_tag}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"[평가 시작] 모델 {llm.PROVIDER}/{llm.MODEL}, 질문 {len(questions)}개 x 조건 2개")
+    print(f"[평가 시작] 모델 {llm.PROVIDER}/{llm.MODEL}, 질문 파일 {q_path.name}, "
+          f"질문 {len(questions)}개 x 조건 {len(conditions)}개 ({' vs '.join(conditions)})")
     print("  모델 로딩 중 (첫 응답 시간이 측정에 섞이지 않게 미리 한 번 호출)...")
     _original_call_llm("짧게 답해.", "안녕")
 
@@ -81,21 +97,28 @@ def main():
 
     for q in questions:
         answers = {}
-        for cond in CONDITIONS:
-            ans, sec, called = run_condition(cond, q["question"], all_events)
+        for cond in conditions:
+            ans, sec, called, info = run_condition(cond, q["question"], all_events)
             answers[cond] = ans
             raw.append([q["id"], q["category"], q["question"], q["expected"], cond, ans, sec,
-                        "Y" if called else "N"])
-            print(f"  {q['id']} {cond:<10} {sec:5.1f}s  LLM {'호출' if called else '생략'}")
+                        "Y" if called else "N",
+                        info["attempts"], "; ".join(info["problems"]),
+                        "Y" if info["replaced"] else "N"])
+            mark = ""
+            if cond == "verified":
+                mark = f"  검증 {info['attempts']}회" + ("  -> 기록 목록으로 대체" if info["replaced"]
+                                                     else ("  -> 재생성 후 통과" if info["attempts"] > 1 else ""))
+            print(f"  {q['id']} {cond:<10} {sec:5.1f}s  LLM {'호출' if called else '생략'}{mark}")
 
-        order = list(CONDITIONS)
+        order = list(conditions)
         rng.shuffle(order)
         sheet.append([q["id"], q["category"], q["question"], q["expected"],
                       answers[order[0]], "", "", answers[order[1]], "", "", ""])
         key.append([q["id"], order[0], order[1]])
 
     write_csv(out_dir / "raw.csv",
-              ["번호", "유형", "질문", "정답", "조건", "답변", "응답시간(초)", "LLM호출"], raw)
+              ["번호", "유형", "질문", "정답", "조건", "답변", "응답시간(초)", "LLM호출",
+               "검증 시도", "검증이 찾은 문제", "기록 목록으로 대체"], raw)
     write_csv(out_dir / "grading_sheet.csv",
               ["번호", "유형", "질문", "정답", "답변 A", "A 정확(O/△/X)", "A 지어냄(Y/N)",
                "답변 B", "B 정확(O/△/X)", "B 지어냄(Y/N)", "메모"], sheet)

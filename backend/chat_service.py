@@ -37,9 +37,14 @@ def select_events(question, now=None, db_path=None):
     return [dict(r) for r in rows], day, day_label, scope_label
 
 
-def chat(question, now=None, db_path=None):
-    """대시보드 질문창과 평가 스크립트가 함께 쓰는 질문 처리."""
+def chat(question, now=None, db_path=None, verify=False, verify_info=None):
+    """대시보드 질문창과 평가 스크립트가 함께 쓰는 질문 처리.
+
+    verify=True면 LLM 답변의 시각/건수를 기록과 대조하고, 틀리면 한 번 다시 생성한다.
+    (평가용 옵션이라 기본값은 꺼짐)
+    """
     now = now or datetime.now()
     events, day, day_label, scope_label = select_events(question, now, db_path)
-    answer = answer_question(question, events, day, day_label, now=now)
+    answer = answer_question(question, events, day, day_label, now=now,
+                             verify=verify, verify_info=verify_info)
     return {"answer": answer, "event_count": len(events), "scope": scope_label}
