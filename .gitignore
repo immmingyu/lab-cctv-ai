@@ -20,3 +20,4 @@ data/sample_videos/*.mp4
 .vscode/
 
 data/recordings/
+data/replay_results/

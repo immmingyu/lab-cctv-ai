@@ -15,6 +15,7 @@ TARGET_OBJECTS = ["laptop", "book"]
 EXPECTED = {"fall": "fall_detection", "intrusion": "restricted_area_intrusion",
             "object_move": "object_displacement"}
 GRACE = 2.0   # 시도 끝(e)을 조금 일찍 눌렀을 때를 위한 여유 시간(초)
+RESULT_DIR = Path("data/replay_results")
 
 # 정상 동작별로 "생기면 오경보인 이벤트" (사람 작업 기준)
 NORMAL_TARGETS = {
@@ -101,6 +102,7 @@ def run_people(cap, times, mirror, roi):
 
 def score(marks, events, groups, out_dir):
     trial_rows = []
+    event_rows = []
     for variant, evs in events.items():
         used = set()
         stats = {}   # (label, group) -> [시도, 성공]
@@ -125,6 +127,8 @@ def score(marks, events, groups, out_dir):
                                "; ".join(f"{evs[i]['type']}({evs[i]['detail']})@{evs[i]['t']:.1f}" for i in inwin),
                                "성공" if ok else "실패"])
         outside = [e for i, e in enumerate(evs) if i not in used]
+        event_rows += [[variant, round(e["t"], 1), e["type"], e["detail"], "밖" if i not in used else "안"]
+                       for i, e in enumerate(evs)]
 
         print(f"\n===== {variant} =====")
         for label in ("fall", "intrusion", "object_move", "normal"):
@@ -144,7 +148,12 @@ def score(marks, events, groups, out_dir):
         w = csv.writer(f)
         w.writerow(["설정", "시도", "종류", "그룹", "시작(초)", "끝(초)", "구간 안 이벤트", "결과"])
         w.writerows(trial_rows)
+    with open(out_dir / "replay_events.csv", "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f)
+        w.writerow(["설정", "시각(초)", "이벤트", "내용", "시도 구간"])
+        w.writerows(event_rows)
     print(f"\n시도별 결과: {out_dir / 'replay_trials.csv'}")
+    print(f"이벤트 목록: {out_dir / 'replay_events.csv'}")
 
 
 def main():
@@ -170,7 +179,10 @@ def main():
         events = run_people(cap, times, not args.no_mirror, parse_roi(args.roi))
     cap.release()
 
-    score(marks, events, parse_groups(args.groups), d)
+    # 녹화 폴더(data/recordings)는 건드리지 않도록 결과는 따로 저장
+    out_dir = RESULT_DIR / d.name
+    out_dir.mkdir(parents=True, exist_ok=True)
+    score(marks, events, parse_groups(args.groups), out_dir)
 
 
 if __name__ == "__main__":
