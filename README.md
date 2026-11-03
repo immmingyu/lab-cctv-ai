@@ -29,6 +29,12 @@
 - **AI:** `python -m src.main`
 - **대시보드:** `http://127.0.0.1:8000/`
 
+### 5. 한 번에 실행 (데모용)
+위 3개를 순서대로 띄우고 브라우저까지 여는 스크립트. 중간에 실패하면 어디서 막혔는지 알려주고, 창을 닫으면 같이 띄운 프로세스를 정리한다.
+- Windows: `powershell -ExecutionPolicy Bypass -File scripts\start_demo.ps1`
+- Mac/Linux: `bash scripts/start_demo.sh`
+- 화면이 없는 환경(SSH 등)에서는 `-NoBrowser` / `--no-browser` 사용
+
 ## 평가 설정 (확정: 2026-11-03, 새 영상 검증 전 고정)
 2026-11-03 녹화 영상은 개발용으로만 쓰고, 아래 값은 새 영상 결과를 보고 다시 바꾸지 않는다.
 
