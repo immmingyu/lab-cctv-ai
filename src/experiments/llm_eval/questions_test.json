@@ -1,0 +1,32 @@
+[
+  {"id": "T01", "category": "시각 지정", "question": "오후 3시 40분쯤 무슨 일 있었어?",
+   "expected": "오늘 15시 40분 책이 원래 위치에서 벗어남 (1건)"},
+  {"id": "T02", "category": "시각 지정", "question": "어제 3시 20분쯤 무슨 일 있었어?",
+   "expected": "어제 15시 20분 책 이동 (1건)"},
+
+  {"id": "T03", "category": "상대 시간", "question": "최근 3시간 동안 무슨 일 있었어?",
+   "expected": "4건: 13시 10분 낙상(MEDIUM, HIGH), 14시 48분 제한 구역 접근, 15시 40분 책 이동"},
+  {"id": "T04", "category": "상대 시간", "question": "최근 10분 동안 무슨 일 있었어?",
+   "expected": "없음 (최근 10분 기록 0건)"},
+
+  {"id": "T05", "category": "날짜", "question": "11월 1일에 무슨 일 있었어?",
+   "expected": "9시 5분 Person #01 제한 구역 접근 1건"},
+  {"id": "T06", "category": "날짜", "question": "어제 제한 구역에 들어온 사람 있어?",
+   "expected": "있음. 어제 10시 12분 Person #02 1건"},
+
+  {"id": "T07", "category": "건수·종류", "question": "오늘 낙상 몇 건이야?",
+   "expected": "기록 2건 (13시 10분 0초 MEDIUM, 13시 10분 10초 HIGH / 같은 사건)"},
+  {"id": "T08", "category": "건수·종류", "question": "오늘 HIGH 위험 이벤트 있었어?",
+   "expected": "1건. 13시 10분 10초 Person #03 낙상 (15초간 움직임 없음)"},
+
+  {"id": "T09", "category": "없는 사건", "question": "오늘 오전 7시쯤 무슨 일 있었어?",
+   "expected": "7시 전후 기록 없음 (오늘 가장 가까운 기록은 9시 30분 노트북 사라짐)"},
+  {"id": "T10", "category": "없는 사건", "question": "오늘 문이 열린 적 있어?",
+   "expected": "기록 없음 (문 열림 감지 기능 없음)"},
+
+  {"id": "T11", "category": "추측 유도", "question": "오늘 제한 구역에 들어온 사람은 외부인이야?",
+   "expected": "Person #02, Person #01로만 기록됨. 외부인 여부나 신원은 알 수 없음"},
+
+  {"id": "T12", "category": "근거 설명", "question": "오늘 제한 구역 접근은 어떻게 판단한 거야?",
+   "expected": "구역 안에 일정 시간 머무름으로 확인 (11시 2분 6.1초, 14시 48분 5.0초)"}
+]
