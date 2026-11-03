@@ -9,8 +9,11 @@ import cv2
 from src.capture.camera import open_source, read_frame
 
 # 숫자 키로 시도 종류 표시, e로 시도 끝
-LABEL_KEYS = {ord("1"): "fall", ord("2"): "intrusion", ord("3"): "object_move", ord("0"): "normal"}
-LABEL_TEXT = {"fall": "FALL", "intrusion": "INTRUSION", "object_move": "OBJECT MOVE", "normal": "NORMAL (no event)"}
+# 9 = 정리 시간(reset): 시도 사이에 물건을 되돌리는 등 채점하지 않을 구간
+LABEL_KEYS = {ord("1"): "fall", ord("2"): "intrusion", ord("3"): "object_move", ord("0"): "normal",
+              ord("9"): "reset"}
+LABEL_TEXT = {"fall": "FALL", "intrusion": "INTRUSION", "object_move": "OBJECT MOVE", "normal": "NORMAL (no event)",
+              "reset": "RESET (tidy up)"}
 
 
 def parse_args():
@@ -48,7 +51,7 @@ def main():
     start = time.perf_counter()
 
     print(f"[녹화 시작] {out_dir}  ({w}x{h}, 약 {fps:.1f} FPS)")
-    print("  1=낙상  2=제한 구역  3=물건 이동  0=정상 동작  →  e=시도 끝  q=종료")
+    print("  1=낙상  2=제한 구역  3=물건 이동  0=정상 동작  9=정리 시간  →  e=끝  q=종료")
 
     while True:
         ret, frame = read_frame(cap)            # 원본 그대로 (좌우 반전 없음)
@@ -65,7 +68,7 @@ def main():
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
         counts = {k: sum(m[0] == k for m in marks) for k in LABEL_TEXT}
         cv2.putText(preview, f"fall {counts['fall']}  intr {counts['intrusion']}  "
-                             f"obj {counts['object_move']}  normal {counts['normal']}",
+                             f"obj {counts['object_move']}  normal {counts['normal']}  reset {counts['reset']}",
                     (10, h - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
         if current:
             cv2.putText(preview, f"TRIAL: {LABEL_TEXT[current[0]]} ({t - current[1]:.1f}s)  [e]=end",
@@ -100,8 +103,16 @@ def main():
     with open(out_dir / "marks.csv", "w", newline="", encoding="utf-8") as f:
         mw = csv.writer(f)
         mw.writerow(["trial", "label", "start_t", "end_t", "start_frame", "end_frame"])
-        for i, (label, st, et, sf, ef) in enumerate(marks, 1):
-            mw.writerow([i, label, round(st, 3), round(et, 3), sf, ef])
+        # 시도 번호는 진짜 시도만 1, 2, 3... (--groups 번호가 밀리지 않게), 정리 시간은 R1, R2...
+        n_trial = n_reset = 0
+        for label, st, et, sf, ef in marks:
+            if label == "reset":
+                n_reset += 1
+                num = f"R{n_reset}"
+            else:
+                n_trial += 1
+                num = n_trial
+            mw.writerow([num, label, round(st, 3), round(et, 3), sf, ef])
 
     print(f"\n[녹화 완료] {idx}프레임, {time.perf_counter() - start:.1f}초")
     for k, v in LABEL_TEXT.items():

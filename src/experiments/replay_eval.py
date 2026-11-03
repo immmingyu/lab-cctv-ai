@@ -107,6 +107,9 @@ def run_people(cap, times, mirror, roi):
 
 
 def score(marks, events, groups, out_dir):
+    # 정리 시간(reset, 번호 R1, R2...)은 채점하지 않고, 그 안의 이벤트만 따로 셈
+    resets = [m for m in marks if m["label"] == "reset"]
+    marks = [m for m in marks if m["label"] != "reset"]
     trial_rows = []
     event_rows = []
     for variant, evs in events.items():
@@ -132,8 +135,12 @@ def score(marks, events, groups, out_dir):
             trial_rows.append([variant, n, label, g, round(st, 1), round(et - GRACE, 1),
                                "; ".join(f"{evs[i]['type']}({evs[i]['detail']})@{evs[i]['t']:.1f}" for i in inwin),
                                "성공" if ok else "실패"])
-        outside = [e for i, e in enumerate(evs) if i not in used]
-        event_rows += [[variant, round(e["t"], 1), e["type"], e["detail"], "밖" if i not in used else "안"]
+        # 시도 구간에 안 들어간 이벤트 중 정리 시간 안의 것 (시도 끝처럼 GRACE 여유를 줌)
+        in_reset = {i for i, e in enumerate(evs) if i not in used and any(
+            float(r["start_t"]) <= e["t"] <= float(r["end_t"]) + GRACE for r in resets)}
+        outside = [e for i, e in enumerate(evs) if i not in used and i not in in_reset]
+        event_rows += [[variant, round(e["t"], 1), e["type"], e["detail"],
+                        "안" if i in used else ("정리" if i in in_reset else "밖")]
                        for i, e in enumerate(evs)]
 
         print(f"\n===== {variant} =====")
@@ -147,6 +154,8 @@ def score(marks, events, groups, out_dir):
             if len(rows) > 1 or "-" not in rows:
                 for g, v in rows.items():
                     print(f"      {g:<10} {v[1]}/{v[0]}")
+        if resets:   # 정리 시간이 없는 예전 녹화는 출력이 예전과 같게
+            print(f"  정리 중 이벤트: {len(in_reset)}개 (정리 시간 {len(resets)}회, 채점 제외)")
         print(f"  시도 구간 밖 이벤트: {len(outside)}개"
               + (" → " + ", ".join(f"{e['type']}@{e['t']:.0f}s" for e in outside[:10]) if outside else ""))
 
