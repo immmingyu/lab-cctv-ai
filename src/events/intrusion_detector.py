@@ -23,7 +23,7 @@ class IntrusionDetector:
         pts = np.array(self.roi_points, dtype=np.int32).reshape((-1, 1, 2))
         cv2.polylines(frame, [pts], isClosed=True, color=color, thickness=thickness)
 
-    def update(self, track_id, is_inside_now):
+    def update(self, track_id, is_inside_now, now=None):
         """
         매 프레임마다 호출. track_id가 ROI 안에 머문 시간을 추적.
 
@@ -33,7 +33,7 @@ class IntrusionDetector:
             "new_event": bool  <- 방금 막 '접근 확정'(임계시간 초과) 시점일 때만 True
         }
         """
-        now = time.time()
+        now = time.time() if now is None else now
 
         if track_id not in self.states:
             self.states[track_id] = {"entered_at": None, "notified": False}

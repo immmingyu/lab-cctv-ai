@@ -26,7 +26,7 @@ CAPTURE_DIR = Path("data/captures")
 
 SKELETON_LINES = [(5, 6), (5, 11), (6, 12), (11, 12)]
 RISK_COLORS = {"LOW": (0, 255, 0), "MEDIUM": (0, 165, 255), "HIGH": (0, 0, 255)}
-ROI_POINTS = [(264, 315), (256, 386), (412, 391), (415, 319)]
+ROI_POINTS = [(178, 395), (185, 475), (311, 478), (318, 407)]
 
 # 나중에 5개로 늘릴 땐 여기에 클래스만 추가: ["laptop", "book", "cup", "cell phone", "backpack"]
 TARGET_OBJECTS = ["laptop", "book"]

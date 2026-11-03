@@ -69,7 +69,7 @@ class FallDetector:
             # 그 사이 값이면 바꾸지 않음
         return state["smoothed"]
 
-    def update(self, track_id, posture):
+    def update(self, track_id, posture, now=None):
         """
         반환값: {
             "posture": 스무딩된 자세 (화면 표시용),
@@ -77,8 +77,9 @@ class FallDetector:
             "duration": 누워 있는 시간(초),
             "new_event": None / "MEDIUM" / "HIGH"
         }
+        now: 현재 시각(초). 안 넘기면 실제 시계, 영상 재생 때는 영상 속 시각.
         """
-        now = time.time()
+        now = time.time() if now is None else now
         if track_id not in self.states:
             self.states[track_id] = self._new_state()
         state = self.states[track_id]
