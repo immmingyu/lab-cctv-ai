@@ -28,3 +28,19 @@
 - **서버:** `uvicorn backend.app:app --reload`
 - **AI:** `python -m src.main`
 - **대시보드:** `http://127.0.0.1:8000/`
+
+## 평가 설정 (확정: 2026-11-03, 새 영상 검증 전 고정)
+2026-11-03 녹화 영상은 개발용으로만 쓰고, 아래 값은 새 영상 결과를 보고 다시 바꾸지 않는다.
+
+| 항목 | 값 | 위치 |
+|---|---|---|
+| VLM 질문 문구 | 이 사람이 누워 있거나 쓰러진 자세입니까? 장소(바닥, 매트 등)와 상관없이 자세만 보고 예/아니오로 답하고 근거를 짧게 적어주세요. | `src/detection/vlm_client.py` `QUESTION` |
+| VLM 호출: 정지 시간 | 8초 | `StillnessTrigger(still_seconds=8)` |
+| VLM 호출: 정지 기준 | 관절 평균 이동이 사람 박스 긴 변의 5% 이하 | `StillnessTrigger(motion_ratio=0.05)` |
+| VLM 호출: 튐 무시 | 기준을 넘는 움직임이 연속 3프레임 이상일 때만 정지 시간 초기화 | `StillnessTrigger(reset_frames=3)` |
+| 화면 가장자리 보류 | 사람 박스가 상하좌우 5픽셀 이내에 닿으면 그 프레임은 낙상, VLM 판단 보류 (규칙만 / 규칙+VLM 공통) | `src/events/fall_detector.py` `EDGE_MARGIN` |
+| VLM 모델 | 로컬 Ollama `qwen3-vl:4b-instruct` (`.env`의 `VLM_MODEL`) | `src/config.py` |
+
+재생 평가 (사람):
+`python -m src.experiments.replay_eval <녹화 폴더> --task people --vlm --roi "..." --groups "..."`
+결과는 `data/replay_results/`에 저장 (`data/recordings`는 읽기만).
