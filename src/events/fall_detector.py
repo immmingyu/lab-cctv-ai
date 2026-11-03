@@ -87,11 +87,14 @@ class FallDetector:
             "new_event": None / "MEDIUM" / "HIGH"
         }
         now: 현재 시각(초). 안 넘기면 실제 시계, 영상 재생 때는 영상 속 시각.
-        hold: True면 이 프레임은 판단 보류 - 자세 투표에서 빼고(unknown처럼), 새 경보도 내지 않음
-              (계속 누워 있으면 보류가 풀린 다음 프레임에서 경보)
+        hold: True면 이 프레임은 '누움 쪽 판단만' 보류 (예: 사람 박스가 화면 가장자리에 닿음)
+              - '누움' 투표는 빼고(unknown처럼), 새 경보도 내지 않음
+                (계속 누워 있으면 보류가 풀린 다음 프레임에서 경보)
+              - '서 있음' 투표와 회복(서 있음 recovery_seconds -> 사건 종료)은 그대로 인정
+                (서 있는 사람은 화면 위아래 끝에 닿기 쉬워, 전부 보류하면 상태가 '누움'으로 멈춤)
         """
         now = time.time() if now is None else now
-        if hold:
+        if hold and posture == "lying":
             posture = "unknown"
         if track_id not in self.states:
             self.states[track_id] = self._new_state()

@@ -165,9 +165,10 @@ def main():
             track_id = p["track_id"]
             x1, y1, x2, y2 = p["bbox"]
             keypoints = p["keypoints"]
+            # 몸이 화면 밖으로 잘림 -> 누움 쪽 판단과 VLM 보류 (화면에 EDGE로 표시해 촬영 구도 확인)
+            edge = touches_edge((x1, y1, x2, y2), frame.shape)
 
             if show_fall:
-                edge = touches_edge((x1, y1, x2, y2), frame.shape)   # 몸이 화면 밖으로 잘림 -> 낙상, VLM 판단 보류
                 posture = fall_detector.get_posture(keypoints)
                 fall_status = fall_detector.update(track_id, posture, hold=edge)
                 posture = fall_status["posture"]
@@ -208,6 +209,9 @@ def main():
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 cv2.putText(frame, f"ID {track_id}", (x1, y1 - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+            if edge:   # 박스 위쪽이 잘릴 수 있어 박스 안쪽에 표시
+                cv2.putText(frame, "EDGE", (x1 + 5, y1 + 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
 
             if show_intrusion:
                 foot_point = get_foot_point((x1, y1, x2, y2))
