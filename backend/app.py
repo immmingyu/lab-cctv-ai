@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from backend.db import get_conn, init_db
 from backend.llm import MODEL, PROVIDER, generate_summary
-from backend import chat_service
+from backend import chat_service, notify
 
 app = FastAPI(title="Lab CCTV Backend")
 init_db()
@@ -22,6 +22,7 @@ SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/snapshots", StaticFiles(directory=SNAPSHOT_DIR), name="snapshots")
 
 print(f"[LLM] provider={PROVIDER}, model={MODEL}")  # ★ 어떤 LLM을 쓰는지 서버 시작 시 표시
+print(f"[Discord] {'켜짐 (HIGH 이벤트 텍스트 전송)' if notify.is_enabled() else '꺼짐 (.env 의 DISCORD_WEBHOOK_URL 없음)'}")
 
 
 class EventIn(BaseModel):
@@ -75,7 +76,10 @@ def create_event(event: EventIn, background_tasks: BackgroundTasks):  # ★
         )
         row_id = cur.lastrowid
 
-    background_tasks.add_task(add_llm_summary, row_id, event.model_dump())  # ★
+    data = event.model_dump()
+    background_tasks.add_task(add_llm_summary, row_id, data)  # ★
+    # LLM 요약을 기다리지 않고 따로 보냄 (HIGH일 때만, 텍스트만)
+    background_tasks.add_task(notify.notify_high, data)
     return {"id": row_id, "status": "saved"}
 
 
