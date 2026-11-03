@@ -8,7 +8,7 @@ import cv2
 from src.detection.object_detector import ObjectDetector
 from src.detection.pose_estimator import PoseEstimator
 from src.detection.vlm_client import VlmClient, crop_person
-from src.events.fall_detector import FallDetector
+from src.events.fall_detector import FallDetector, touches_edge
 from src.events.intrusion_detector import IntrusionDetector
 from src.events.object_displacement_detector import ObjectDisplacementDetector
 from src.events.stillness_trigger import StillnessTrigger
@@ -106,7 +106,8 @@ def run_people(cap, times, mirror, roi, use_vlm=False, vlm_calls=None):
     for t, frame in frames(cap, times, mirror):
         for p in pose.estimate(frame):
             tid = p["track_id"]
-            fs = fall.update(tid, fall.get_posture(p["keypoints"]), now=t)
+            edge = touches_edge(p["bbox"], frame.shape)   # 몸이 화면 밖으로 잘림 -> 낙상, VLM 판단 보류
+            fs = fall.update(tid, fall.get_posture(p["keypoints"]), now=t, hold=edge)
             if fs["new_event"]:
                 evs.append({"t": t, "type": "fall_detection", "detail": fs["new_event"]})
             x1, y1, x2, y2 = p["bbox"]
@@ -114,7 +115,7 @@ def run_people(cap, times, mirror, roi, use_vlm=False, vlm_calls=None):
             if ist["new_event"]:
                 evs.append({"t": t, "type": "restricted_area_intrusion", "detail": f"ID{tid}"})
             if use_vlm:
-                st = stillness.update(tid, p["keypoints"], p["bbox"], fs["posture"], now=t)
+                st = stillness.update(tid, p["keypoints"], p["bbox"], fs["posture"], now=t, hold=edge)
                 if st["ask"]:
                     ans = vlm.ask_lying(crop_person(frame, p["bbox"]))
                     vlm_calls.append({"t": round(t, 1), "track_id": tid, "rule_posture": fs["posture"], **ans})
@@ -198,6 +199,7 @@ def main():
     ap.add_argument("--roi", default="", help="제한 구역 좌표 예: '178,395 185,475 311,478 318,407'")
     ap.add_argument("--groups", default="", help="시도 번호 그룹 예: 'desk=1-14 out=15-24'")
     ap.add_argument("--no-mirror", action="store_true", help="좌우 반전 끄기")
+    ap.add_argument("--tag", default="", help="결과 폴더 이름 뒤에 붙일 표시 (예: dev_check -> 개발용 확인)")
     ap.add_argument("--vlm", action="store_true", help="people 작업: '규칙만' vs '규칙 + VLM' 비교 (로컬 Ollama 필요)")
     args = ap.parse_args()
 
@@ -205,7 +207,7 @@ def main():
     times = [float(r["t"]) for r in load_csv(d / "frames.csv")]
     marks = load_csv(d / "marks.csv")
     cap = cv2.VideoCapture(str(d / "video.mp4"))
-    print(f"[재생 평가] {d.name}  프레임 {len(times)}, 시도 {len(marks)}개, 작업 {args.task}")
+    print(f"[재생 평가{' / ' + args.tag if args.tag else ''}] {d.name}  프레임 {len(times)}, 시도 {len(marks)}개, 작업 {args.task}")
 
     if args.task == "object":
         events = run_object(cap, times, not args.no_mirror)
@@ -217,7 +219,7 @@ def main():
     cap.release()
 
     # 녹화 폴더(data/recordings)는 건드리지 않도록 결과는 따로 저장
-    out_dir = RESULT_DIR / d.name
+    out_dir = RESULT_DIR / (f"{d.name}_{args.tag}" if args.tag else d.name)
     out_dir.mkdir(parents=True, exist_ok=True)
     score(marks, events, parse_groups(args.groups), out_dir)
 

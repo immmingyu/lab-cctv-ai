@@ -2,6 +2,15 @@ import math
 import time
 from collections import deque
 
+EDGE_MARGIN = 5   # 사람 박스가 화면 가장자리 이 픽셀 이내에 닿으면 판단 보류 (README '평가 설정')
+
+
+def touches_edge(bbox, frame_shape, margin=EDGE_MARGIN):
+    """사람 박스가 화면 상하좌우 가장자리에 닿았는지 (몸이 잘려 자세 판단을 믿기 어려움)."""
+    h, w = frame_shape[:2]
+    x1, y1, x2, y2 = bbox
+    return x1 <= margin or y1 <= margin or x2 >= w - margin or y2 >= h - margin
+
 
 class FallDetector:
     """
@@ -69,7 +78,7 @@ class FallDetector:
             # 그 사이 값이면 바꾸지 않음
         return state["smoothed"]
 
-    def update(self, track_id, posture, now=None):
+    def update(self, track_id, posture, now=None, hold=False):
         """
         반환값: {
             "posture": 스무딩된 자세 (화면 표시용),
@@ -78,8 +87,12 @@ class FallDetector:
             "new_event": None / "MEDIUM" / "HIGH"
         }
         now: 현재 시각(초). 안 넘기면 실제 시계, 영상 재생 때는 영상 속 시각.
+        hold: True면 이 프레임은 판단 보류 - 자세 투표에서 빼고(unknown처럼), 새 경보도 내지 않음
+              (계속 누워 있으면 보류가 풀린 다음 프레임에서 경보)
         """
         now = time.time() if now is None else now
+        if hold:
+            posture = "unknown"
         if track_id not in self.states:
             self.states[track_id] = self._new_state()
         state = self.states[track_id]
@@ -107,12 +120,12 @@ class FallDetector:
 
         if duration >= self.high_risk_seconds:
             risk = "HIGH"
-            if not state["notified_high"]:
+            if not state["notified_high"] and not hold:
                 new_event = "HIGH"
                 state["notified_high"] = True
         elif duration >= self.medium_risk_seconds:
             risk = "MEDIUM"
-            if not state["notified_medium"]:
+            if not state["notified_medium"] and not hold:
                 new_event = "MEDIUM"
                 state["notified_medium"] = True
         else:

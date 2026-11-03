@@ -12,7 +12,7 @@ from src.detection.object_detector import ObjectDetector
 from src.detection.pose_estimator import PoseEstimator
 from src.detection.vlm_client import VlmClient, crop_person
 from src.events.event_sender import EventSender
-from src.events.fall_detector import FallDetector
+from src.events.fall_detector import FallDetector, touches_edge
 from src.events.intrusion_detector import IntrusionDetector
 from src.events.object_displacement_detector import ObjectDisplacementDetector
 from src.events.stillness_trigger import StillnessTrigger
@@ -167,8 +167,9 @@ def main():
             keypoints = p["keypoints"]
 
             if show_fall:
+                edge = touches_edge((x1, y1, x2, y2), frame.shape)   # 몸이 화면 밖으로 잘림 -> 낙상, VLM 판단 보류
                 posture = fall_detector.get_posture(keypoints)
-                fall_status = fall_detector.update(track_id, posture)
+                fall_status = fall_detector.update(track_id, posture, hold=edge)
                 posture = fall_status["posture"]
                 risk = fall_status["risk"]
                 duration = fall_status["duration"]
@@ -197,7 +198,7 @@ def main():
                     ))
 
                 if use_vlm:
-                    st = stillness.update(track_id, keypoints, (x1, y1, x2, y2), posture)
+                    st = stillness.update(track_id, keypoints, (x1, y1, x2, y2), posture, hold=edge)
                     if st["ask"]:
                         crop = crop_person(raw_frame, (x1, y1, x2, y2))   # 박스, 뼈대가 그려지기 전 원본에서 자름
                         vlm_jobs.append((vlm_pool.submit(vlm.ask_lying, crop), track_id, (x1, y1, x2, y2), st["still"]))
