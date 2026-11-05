@@ -1,10 +1,12 @@
 import argparse
 import csv
+import json
 import math
 from pathlib import Path
 
 import cv2
 
+from src.config import OBJECT_MODEL
 from src.detection.object_detector import ObjectDetector
 from src.detection.pose_estimator import PoseEstimator
 from src.detection.vlm_client import VlmClient, crop_person
@@ -55,6 +57,43 @@ def parse_groups(text):
         for n in range(int(a), int(b or a) + 1):
             groups[n] = name
     return groups
+
+
+def place_of(rec_dir):
+    """녹화 장소: notes.txt의 '장소: home' 줄, 없으면 이름의 _home_ / _school_."""
+    notes = Path(rec_dir) / "notes.txt"
+    if notes.exists():
+        for line in notes.read_text(encoding="utf-8").splitlines():
+            if line.strip().startswith("장소:"):
+                return line.split(":", 1)[1].strip()
+    name = Path(rec_dir).name
+    return "home" if "_home" in name else ("school" if "_school" in name else None)
+
+
+def training_note(rec_dir, model_path):
+    """
+    파인튜닝 모델로 학습에 쓴 영상/장소를 평가하면 '참고용' 표시 (기본 yolov8s는 None).
+    학습 기록: runs/<이름>/args.yaml(ultralytics) -> 데이터셋 폴더 -> sessions.json (build_dataset)
+    기록을 못 찾으면 README대로 집(home)을 학습 장소로 봄.
+    """
+    if Path(model_path).name == "yolov8s.pt":
+        return None
+    sessions, places = set(), {"home"}
+    args_yaml = Path(model_path).parent.parent / "args.yaml"
+    if args_yaml.exists():
+        import yaml   # ultralytics가 함께 설치하는 PyYAML
+        data = yaml.safe_load(args_yaml.read_text(encoding="utf-8")).get("data", "")
+        info = Path(data).with_name("sessions.json")
+        if info.exists():
+            sj = json.loads(info.read_text(encoding="utf-8"))
+            sessions = set(sj["train"]) | set(sj["val"])
+            places = {place_of(Path("data/recordings") / n) for n in sessions} - {None} or {"home"}
+    name = Path(rec_dir).name
+    if name in sessions:
+        return "참고용(학습/검증에 쓴 영상)"
+    if place_of(rec_dir) in places:
+        return f"참고용(학습에 쓴 장소: {place_of(rec_dir)})"
+    return None
 
 
 def frames(cap, times, mirror):
@@ -218,6 +257,9 @@ def main():
     times = [float(r["t"]) for r in load_csv(d / "frames.csv")]
     marks = load_csv(d / "marks.csv")
     groups = parse_groups(args.groups)   # 영상 처리 전에 먼저 읽어서, 형식이 틀리면 바로 멈추게
+    note = training_note(d, args.object_model or OBJECT_MODEL) if args.task == "object" else None
+    if note:
+        print(f"※ {note} — 파인튜닝 모델이 학습한 장소의 영상이라 성능 비교의 근거로 쓰지 않음")
     cap = cv2.VideoCapture(str(d / "video.mp4"))
     print(f"[재생 평가{' / ' + args.tag if args.tag else ''}] {d.name}  프레임 {len(times)}, 시도 {len(marks)}개, 작업 {args.task}")
 
@@ -232,7 +274,14 @@ def main():
 
     # 녹화 폴더(data/recordings)는 건드리지 않도록 결과는 따로 저장
     out_dir = RESULT_DIR / (f"{d.name}_{args.tag}" if args.tag else d.name)
+    if note:
+        out_dir = out_dir.with_name(out_dir.name + "_ref_trainplace")
     out_dir.mkdir(parents=True, exist_ok=True)
+    if note:
+        (out_dir / "notes.txt").write_text(
+            f"[{note}]\n물건 검출 모델: {args.object_model or OBJECT_MODEL}\n"
+            "파인튜닝 모델이 학습한 장소의 영상이라 성능 비교의 근거로 쓰지 않음 (학교 시험 영상 결과를 볼 것)\n",
+            encoding="utf-8")
     score(marks, events, groups, out_dir)
 
     if args.task == "people" and args.vlm:

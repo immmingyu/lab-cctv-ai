@@ -1,5 +1,6 @@
 import argparse
 import csv
+import json
 import shutil
 from collections import Counter
 from pathlib import Path
@@ -112,6 +113,10 @@ def main():
             "train: images/train\nval: images/val\n"
             "names:\n" + "".join(f"  {i}: {n}\n" for i, n in enumerate(CLASSES)))
     (out / "dataset.yaml").write_text(yaml, encoding="utf-8")
+    # 재생 평가가 '학습에 쓴 영상/장소'를 표시할 수 있게 세션 이름을 남김 (세션 이름 = 녹화 이름)
+    (out / "sessions.json").write_text(json.dumps(
+        {"train": [d.name for d in train], "val": [d.name for d in val]}, ensure_ascii=False, indent=2),
+        encoding="utf-8")
     with open(out / "split.csv", "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
         w.writerow(["구분", "세션", "이미지", "book 박스", "laptop 박스", "빈 라벨(물건 없음)", "라벨 없음(건너뜀)", "라벨 오류"])

@@ -90,6 +90,17 @@ LLM 시각 표시 비교 평가: `python -m src.experiments.llm_eval.run_eval --
 | 모델 교체 | `.env`의 `OBJECT_MODEL` 한 줄 (기본 `yolov8s.pt`) |
 | 라벨링 도구 | X-AnyLabeling (설치형, 로컬에서만 동작) |
 
+### 세션 계획 (2026-11-05 확정, 학습/검증은 세션 단위)
+| 세션 | 녹화 | 내용 | 용도 |
+|---|---|---|---|
+| 1 | `eval_object_home_20261103_144117` (기존) | 책 이동, 손으로 가리기 장면이 많음 | 학습 |
+| 2 | 새로 촬영 | 높은 각도, 밤 조명, 작게 보이는 책, 노트북 | **검증** (책 확신도 F1 기준도 여기서) |
+| 3 | 새로 촬영 | 다른 방, 다른 책들, 비슷한 물건 | 학습 |
+
+- `eval_people_home_p1_20261103_150718`은 **제외**: 책이 화면에 없음 (물건 영상의 책 자리가 비어 있고, 기본 모델이 화면 오른쪽 끝에서 '책'으로 찾은 6.5%는 책이 아닌 다른 물건)
+- 집 영상이 학습에 들어가므로, 파인튜닝 모델로 집 영상을 재생 평가한 결과는 **참고용(학습에 쓴 장소)** 으로 자동 표시 (결과 폴더 이름 `_ref_trainplace`, notes.txt). 성능 비교는 학교 시험 영상으로만 한다.
+- 11/3 집 영상으로 낸 기본 모델 결과(개발용 확인)는 그대로 개발용 기록으로 둔다.
+
 ### 촬영 목록 (집)
 - 카메라는 학교와 비슷한 높이, 각도 (기준 화면: 학교 물건 세션 `reference_view.jpg`)
 - 학교에서 쓴 그 책 **반드시 포함** + 색, 크기가 다른 책 여러 권
@@ -122,5 +133,5 @@ runs/finetune/<이름>/weights/best.pt   # 학습 결과
 1. 집에서 세션별로 녹화: `python -m src.tools.recorder --name ft_home_s1_day` (세션마다 이름을 다르게)
 2. 프레임 뽑기: `python -m src.tools.extract_frames data/recordings/<녹화이름> --every 1.5`
 3. X-AnyLabeling으로 `data/finetune/frames/<녹화이름>/` 라벨링 (YOLO 형식, 클래스 순서 book, laptop)
-4. 데이터셋 만들기: `python -m src.tools.build_dataset --train <세션1> <세션2> --val <세션3>`
+4. 데이터셋 만들기: `python -m src.tools.build_dataset --train eval_object_home_20261103_144117 <세션3 녹화> --val <세션2 녹화>`
 5. 학습: `yolo detect train model=yolov8s.pt data=data/finetune/dataset/dataset.yaml epochs=100 imgsz=640 batch=16 device=0 patience=20 project=runs/finetune name=book_laptop_v1`
