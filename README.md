@@ -72,3 +72,52 @@ python -m tests.test_verify                                 # 검증 장치 자�
 | 2026-11-05 | LLM에 넘기는 이벤트 시각 표시 | `[11시 2분 30초] ... / 지속 6.1초` | `시각 11:02:30 / ... / 머문 시간 6.1초` (종류별로 머문 시간 / 자세 지속 시간 / 지속 시간), 현재 시각 `16:00`, 시스템 프롬프트에 "시각의 초를 지속 시간으로 읽지 말고, 답할 때는 '11시 2분'처럼 한국어로" 규칙 추가 | 새 질문 T12에서 LLM이 11시 2분 30초의 30초를 머문 시간으로 읽음 | `backend/llm.py` `_event_line`, `TIME_FORMAT_RULE` (예전 형식은 `LEGACY_TIME_FORMAT=True`로 비교 평가 때만) |
 
 LLM 시각 표시 비교 평가: `python -m src.experiments.llm_eval.run_eval --time-format --questions src/experiments/llm_eval/questions.json src/experiments/llm_eval/questions_test.json`
+
+## 물건 검출 파인튜닝 (feature/finetune)
+목적: 학교 시험 영상에서 제자리의 책을 거의 검출하지 못한 문제(#23 가만히 3분 동안 0%) 해결.
+학습 데이터는 집에서만 찍고, 학교 시험 영상(`eval2_object_school_20261104_135118`)은 평가에만 쓴다 (학습, 기준값 정하기에 쓰지 않음).
+
+### 정해진 방식 (2026-11-05)
+| 항목 | 내용 |
+|---|---|
+| 사람 박스 출처 | Pose 모델(yolov8n-pose)의 사람 박스. 기본 모델과 파인튜닝 모델 모두 같음 (차이가 물건 검출에서만 나오게). 11/4 결과와 잇기 위해 "기본 + yolov8s 사람 박스"는 참고 설정으로만 같이 냄 |
+| 클래스 | `book`, `laptop` 2개 (이름 그대로, 이 순서) |
+| 책 확신도 기준 | 기본 모델: 0.15 유지. 파인튜닝 모델: 집 검증 데이터에서 F1이 가장 높은 값 → 학교 영상 평가 **전에** 아래 칸에 기록 |
+| 파인튜닝 모델 책 확신도 (확정값) | (학습 후 기록) |
+| 모델 교체 | `.env`의 `OBJECT_MODEL` 한 줄 (기본 `yolov8s.pt`) |
+| 라벨링 도구 | X-AnyLabeling (설치형, 로컬에서만 동작) |
+
+### 촬영 목록 (집)
+- 카메라는 학교와 비슷한 높이, 각도 (기준 화면: 학교 물건 세션 `reference_view.jpg`)
+- 학교에서 쓴 그 책 **반드시 포함** + 색, 크기가 다른 책 여러 권
+- 책 놓인 모양: 눕힘, 세움, 펼침 / 책상 위 여러 위치 / 손에 일부 가려진 장면
+- 화면에서 **작게** 보이는 책 (카메라에서 먼 곳)
+- 노트북 (열림, 닫힘)
+- 책이 없는 장면: 빈 책상 + **비슷한 물건만 있는 장면** (노트, 종이, 태블릿, 휴대폰) — 이런 장면은 라벨 없이 그대로 둠 (틀리게 찾지 않도록 배우는 용도)
+- 촬영은 **2~3개 세션**으로 나눔 (예: 낮, 밤, 다른 방). 학습/검증은 **세션 단위로** 나눔 (같은 세션의 프레임이 양쪽에 섞이지 않게)
+
+### 라벨링 규칙 (학습 데이터와 학교 평가 데이터에 똑같이 적용)
+1. 책(또는 노트북)이 **30% 이상 보이면** 라벨을 단다. 30% 미만으로 보이면 달지 않는다.
+2. 박스는 **보이는 부분만** 감싼다 (가려진 부분을 짐작해서 넓히지 않음).
+3. 책 여러 권이 겹쳐 쌓여 있으면 보이는 책마다 따로 단다.
+4. 노트, 종이, 태블릿, 휴대폰은 책이 아니므로 라벨을 달지 않는다.
+5. 애매하면 메모(`labels/notes.txt`)에 프레임 이름과 이유를 적고, 같은 판단을 끝까지 유지한다.
+
+### 폴더 구조 (`data/finetune/`, git에 올리지 않음 — 사람 얼굴 포함)
+```
+data/finetune/
+  frames/<녹화이름>/          # extract_frames가 뽑은 프레임 (+ X-AnyLabeling 라벨 .txt, classes.txt)
+  dataset/                     # build_dataset가 만든 학습용 (YOLO 형식)
+    images/train, images/val
+    labels/train, labels/val
+    dataset.yaml
+  school_test/<녹화이름>/      # 학교 평가용 프레임과 라벨 (학습에 쓰지 않음)
+runs/finetune/<이름>/weights/best.pt   # 학습 결과
+```
+
+### 순서
+1. 집에서 세션별로 녹화: `python -m src.tools.recorder --name ft_home_s1_day` (세션마다 이름을 다르게)
+2. 프레임 뽑기: `python -m src.tools.extract_frames data/recordings/<녹화이름> --every 1.5`
+3. X-AnyLabeling으로 `data/finetune/frames/<녹화이름>/` 라벨링 (YOLO 형식, 클래스 순서 book, laptop)
+4. 데이터셋 만들기: `python -m src.tools.build_dataset --train <세션1> <세션2> --val <세션3>`
+5. 학습: `yolo detect train model=yolov8s.pt data=data/finetune/dataset/dataset.yaml epochs=100 imgsz=640 batch=16 device=0 patience=20 project=runs/finetune name=book_laptop_v1`

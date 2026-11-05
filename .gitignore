@@ -21,3 +21,6 @@ data/sample_videos/*.mp4
 
 data/recordings/
 data/replay_results/
+# 파인튜닝 데이터와 학습 결과 (사람 얼굴 포함, 용량 큼)
+data/finetune/
+runs/
