@@ -63,3 +63,12 @@ python -m src.experiments.llm_eval.score_eval <run 폴더>   # 블라인드 채�
 python -m tests.test_verify                                 # 검증 장치 자체 테스트 (LLM 불필요)
 ```
 `questions.json`(23개)은 문제를 찾아낸 개발용, `questions_test.json`(12개)은 검증 장치 비교용.
+
+## 변경된 설정 (feature/finetune 브랜치, 2026-11-05~)
+위 "평가 설정 (확정)"은 2026-11-04 시험 영상 결과의 기록이라 그대로 두고, 이후 바뀐 설정만 여기에 적는다.
+
+| 날짜 | 항목 | 이전 | 변경 | 이유 | 위치 |
+|---|---|---|---|---|---|
+| 2026-11-05 | LLM에 넘기는 이벤트 시각 표시 | `[11시 2분 30초] ... / 지속 6.1초` | `시각 11:02:30 / ... / 머문 시간 6.1초` (종류별로 머문 시간 / 자세 지속 시간 / 지속 시간), 현재 시각 `16:00`, 시스템 프롬프트에 "시각의 초를 지속 시간으로 읽지 말고, 답할 때는 '11시 2분'처럼 한국어로" 규칙 추가 | 새 질문 T12에서 LLM이 11시 2분 30초의 30초를 머문 시간으로 읽음 | `backend/llm.py` `_event_line`, `TIME_FORMAT_RULE` (예전 형식은 `LEGACY_TIME_FORMAT=True`로 비교 평가 때만) |
+
+LLM 시각 표시 비교 평가: `python -m src.experiments.llm_eval.run_eval --time-format --questions src/experiments/llm_eval/questions.json src/experiments/llm_eval/questions_test.json`

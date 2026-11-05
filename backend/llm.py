@@ -39,6 +39,22 @@ CHAT_SYSTEM_PROMPT = """너는 연구실 CCTV 관제 시스템의 질의응답 �
 - 사람의 신원이나 의도는 추측하지 않는다.
 - 마크다운 기호(**, -, # 등)나 목록을 쓰지 않고 일반 문장으로 3~5문장 이내로 답한다."""
 
+# ★ 기록의 시각을 "시각 11:02:30"처럼 넘길 때 덧붙이는 규칙
+#   (예전 "[11시 2분 30초] ... 지속 6.1초" 형식에서 LLM이 30초를 머문 시간으로 읽은 문제)
+TIME_FORMAT_RULE = """
+- 기록의 '시각'은 24시간 HH:MM:SS 형식이다 (예: 11:02:30 = 11시 2분 30초). 시각의 초를 머문 시간이나 지속 시간으로 읽지 않는다.
+- 머문 시간, 지속 시간은 기록의 '머문 시간', '자세 지속 시간', '지속 시간' 값만 사용한다.
+- 답할 때 시각은 '11시 2분'처럼 자연스러운 한국어로 쓰고, 같은 분에 여러 건이 있어 구분해야 할 때만 초까지 쓴다."""
+
+# ★ True면 예전 형식 그대로 (시각 표시 개선 전/후 비교 평가용, 실제 시스템은 False)
+LEGACY_TIME_FORMAT = False
+
+DURATION_LABEL = {
+    "restricted_area_intrusion": "머문 시간",
+    "fall_detection": "자세 지속 시간",
+    "object_displacement": "지속 시간",
+}
+
 
 # ---------- 공통: 시각 포맷 ----------
 def _parse_dt(value):
@@ -222,12 +238,36 @@ def extract_time(question, now, day):
     return base.replace(hour=h, minute=mi), window
 
 
-def _event_line(i, e, with_date=False):
-    """★ with_date=True면 날짜까지 표시."""
+def _event_line(i, e, with_date=False, legacy=None):
+    """
+    ★ with_date=True면 날짜까지 표시.
+    ★ 시각은 "시각 11:02:30", 지속 시간은 "머문 시간 6.1초"처럼 이름을 붙여 헷갈리지 않게 함.
+      legacy=True(또는 LEGACY_TIME_FORMAT)면 예전 "[11시 2분 30초] ... 지속 6.1초" 형식.
+    """
+    legacy = LEGACY_TIME_FORMAT if legacy is None else legacy
     desc = e.get("llm_summary") or e.get("summary")
-    when = _event_dt_text(e) if with_date else _event_time(e)
-    return (f"{i}. [{when}] {_kind(e)} / 대상: {e.get('object')} / "
-            f"위험도: {e.get('risk')} / 지속 {e.get('duration_seconds')}초 / 내용: {desc}")
+    if legacy:
+        when = _event_dt_text(e) if with_date else _event_time(e)
+        return (f"{i}. [{when}] {_kind(e)} / 대상: {e.get('object')} / "
+                f"위험도: {e.get('risk')} / 지속 {e.get('duration_seconds')}초 / 내용: {desc}")
+    d = _event_dt(e)
+    clock = d.strftime("%H:%M:%S") if d else str(e.get("timestamp"))
+    when = f"{d.month}월 {d.day}일 {clock}" if (with_date and d) else clock
+    label = DURATION_LABEL.get(e.get("event_type"), "지속 시간")
+    return (f"{i}. 시각 {when} / {_kind(e)} / 대상: {e.get('object')} / "
+            f"위험도: {e.get('risk')} / {label} {e.get('duration_seconds')}초 / 내용: {desc}")
+
+
+def _chat_system_prompt(legacy=None):
+    legacy = LEGACY_TIME_FORMAT if legacy is None else legacy
+    return CHAT_SYSTEM_PROMPT if legacy else CHAT_SYSTEM_PROMPT + TIME_FORMAT_RULE
+
+
+def _now_text(now, legacy=None):
+    legacy = LEGACY_TIME_FORMAT if legacy is None else legacy
+    if legacy:
+        return f"{now.month}월 {now.day}일 {now.hour}시 {now.minute}분"
+    return f"{now.month}월 {now.day}일 {now:%H:%M}"
 
 
 def _count_text(events):
@@ -283,7 +323,7 @@ def narrow_events(question, events, day, day_label, now):
 
 def build_chat_prompt(question, target_events, scope, now):
     lines = "\n".join(_event_line(i, e) for i, e in enumerate(target_events, 1))
-    return (f"현재 시각: {now.month}월 {now.day}일 {now.hour}시 {now.minute}분\n\n"
+    return (f"현재 시각: {_now_text(now)}\n\n"
             f"이벤트 기록 (시간순):\n{lines}\n\n"
             f"[시스템 계산 결과] 질문 범위: {scope}. "
             f"이 범위의 이벤트는 총 {len(target_events)}건 ({_count_text(target_events)}).\n\n"
@@ -311,7 +351,7 @@ def answer_question(question, events, day=None, day_label="오늘", now=None,
     user = build_chat_prompt(question, target_events, scope, now)
 
     def generate():
-        return call_llm(CHAT_SYSTEM_PROMPT, user, max_tokens=500)
+        return call_llm(_chat_system_prompt(), user, max_tokens=500)
 
     if verify:
         from backend import verify as verifier   # 순환 import 방지를 위해 여기서 불러옴
@@ -335,7 +375,8 @@ def answer_question_ungrounded(question, events, now=None):
     now = now or datetime.now()
     if not events:
         return "기록된 이벤트가 없습니다."
-    lines = "\n".join(_event_line(i, e, with_date=True) for i, e in enumerate(events, 1))
+    # 지난 실험(계산 결과 넣음 vs 뺌)을 그대로 재현할 수 있게 이 비교 조건은 예전 형식 유지
+    lines = "\n".join(_event_line(i, e, with_date=True, legacy=True) for i, e in enumerate(events, 1))
     user = (f"현재 시각: {now.year}년 {now.month}월 {now.day}일 {now.hour}시 {now.minute}분\n\n"
             f"이벤트 기록 (시간순):\n{lines}\n\n"
             f"질문: {question}")
