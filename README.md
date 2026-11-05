@@ -70,6 +70,9 @@ python -m tests.test_verify                                 # 검증 장치 자�
 | 날짜 | 항목 | 이전 | 변경 | 이유 | 위치 |
 |---|---|---|---|---|---|
 | 2026-11-05 | LLM에 넘기는 이벤트 시각 표시 | `[11시 2분 30초] ... / 지속 6.1초` | `시각 11:02:30 / ... / 머문 시간 6.1초` (종류별로 머문 시간 / 자세 지속 시간 / 지속 시간), 현재 시각 `16:00`, 시스템 프롬프트에 "시각의 초를 지속 시간으로 읽지 말고, 답할 때는 '11시 2분'처럼 한국어로" 규칙 추가 | 새 질문 T12에서 LLM이 11시 2분 30초의 30초를 머문 시간으로 읽음 | `backend/llm.py` `_event_line`, `TIME_FORMAT_RULE` (예전 형식은 `LEGACY_TIME_FORMAT=True`로 비교 평가 때만) |
+| 2026-11-05 | 물건 이동 '사람 가림'의 사람 박스 출처 | 물건 검출 모델(yolov8s)의 person | Pose 모델(yolov8n-pose)의 사람 박스. 실시간 `--only object`에서도 Pose를 띄우되 화면에는 사람을 그리지 않음 | 책/노트북만 파인튜닝한 모델은 person을 못 찾음. 기본/파인튜닝 비교에서 차이가 물건 검출에서만 나오게 통일 | `src/main.py`, `replay_eval.py` `OBJECT_VARIANTS` (11/4 방식은 `[참고] ... yolov8s 사람 박스` 설정으로 남김) |
+| 2026-11-05 | 물건 검출 모델 교체 | 코드에 `yolov8s.pt`, 책 0.15 고정 | `.env`의 `OBJECT_MODEL` 한 줄. 확신도 기준은 모델 weights 폴더의 `thresholds.json` (없으면 book 0.15) | 기본/파인튜닝 모델을 한 줄로 바꿔 끼우기 | `src/config.py`, `src/detection/object_detector.py` `conf_thresholds_for` |
+| 2026-11-05 | 재생 평가 `--groups` | 범위(`a-b`)만 | 번호 하나(`idle=23`)도 됨, 영상 처리 전에 먼저 검사 | 11/4 평가가 영상 처리 후 채점 단계에서 멈춤 | `replay_eval.py` `parse_groups` |
 
 LLM 시각 표시 비교 평가: `python -m src.experiments.llm_eval.run_eval --time-format --questions src/experiments/llm_eval/questions.json src/experiments/llm_eval/questions_test.json`
 

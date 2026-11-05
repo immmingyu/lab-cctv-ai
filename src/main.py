@@ -122,7 +122,9 @@ def main():
     print(f"[모드] {mode}  ('s' 캡처 저장, 'q' 종료)")
 
     cap = open_source()
-    pose_estimator = PoseEstimator() if (show_fall or show_intrusion) else None
+    show_people = show_fall or show_intrusion
+    # 물건 이동의 '사람 가림' 판단도 Pose 모델의 사람 박스를 씀 (물건 모델을 바꿔도 사람 검출은 그대로)
+    pose_estimator = PoseEstimator() if (show_people or show_object) else None
     fall_detector = FallDetector()
     # 조건부 VLM: 오래 안 움직이는데 규칙이 누움이 아니라고 할 때만 물어봄 (별도 스레드, 영상 처리는 계속)
     use_vlm = show_fall and not args.no_vlm
@@ -131,7 +133,8 @@ def main():
     vlm_pool = ThreadPoolExecutor(max_workers=1) if use_vlm else None
     vlm_jobs = []   # [(future, track_id, bbox, 정지 시간)]
     intrusion_detector = IntrusionDetector(ROI_POINTS, stay_seconds_threshold=5)
-    object_detector = ObjectDetector(TARGET_OBJECTS, conf_thresholds={"book": 0.15}) if show_object else None
+    # 모델은 .env의 OBJECT_MODEL, 확신도 기준은 모델에 맞춰 (기본 book 0.15)
+    object_detector = ObjectDetector(TARGET_OBJECTS) if show_object else None
     displacement_detector = ObjectDisplacementDetector(TARGET_OBJECTS) if show_object else None
     init_logs()
 
@@ -148,20 +151,23 @@ def main():
         if show_intrusion:
             intrusion_detector.draw(frame)
 
+        # --- 사람 검출 (물건 박스를 그리기 전에) ---
+        people = pose_estimator.estimate(frame) if pose_estimator else []
+
         # --- 물건 이동 ---
         if show_object:
-            # 같은 YOLO 결과의 사람 박스도 넘겨서, 사람이 가리는 동안은 사라짐으로 세지 않게 함
-            obj_detections, person_boxes = object_detector.detect_all(frame)
-            displacement_result = displacement_detector.update(obj_detections, person_boxes=person_boxes)
+            # Pose 사람 박스를 넘겨서, 사람이 가리는 동안은 사라짐으로 세지 않게 함
+            obj_detections = object_detector.detect(frame)
+            displacement_result = displacement_detector.update(
+                obj_detections, person_boxes=[p["bbox"] for p in people])
             draw_objects(frame, obj_detections, displacement_result)
             if not displacement_result["calibrating"]:
                 for cls, r in displacement_result["results"].items():
                     if r.get("new_event"):
                         pending_events.append(create_displacement_event(cls, r["duration"], reason=r["status"]))
 
-        # --- 사람 (낙상 / 제한 구역) ---
-        people = pose_estimator.estimate(frame) if pose_estimator else []
-        for p in people:
+        # --- 사람 (낙상 / 제한 구역) --- 물건 모드만 켰을 때는 사람을 화면에 그리지 않음 (예전과 같은 화면)
+        for p in (people if show_people else []):
             track_id = p["track_id"]
             x1, y1, x2, y2 = p["bbox"]
             keypoints = p["keypoints"]

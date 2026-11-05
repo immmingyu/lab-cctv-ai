@@ -30,7 +30,10 @@ OBJECT_VARIANTS = {
     "예전 (이동만)": dict(missing_confirm_seconds=math.inf),
     "새 로직 (사라짐 4초)": dict(missing_confirm_seconds=4),
     "새 로직 (사라짐 6초)": dict(missing_confirm_seconds=6),
-    "고친 로직 (사람 가림 고려, 4초)": dict(missing_confirm_seconds=4, use_person_boxes=True),
+    # 사람 박스 출처: "pose" = Pose 모델 (기본, 물건 모델과 상관없이 같음)
+    #                "object" = 물건 검출 모델의 person (person 클래스가 있는 기본 yolov8s만, 11/4 결과 비교용)
+    "고친 로직 (사람 가림 고려, Pose 사람 박스, 4초)": dict(missing_confirm_seconds=4, person_source="pose"),
+    "[참고] 사람 가림 고려 (yolov8s 사람 박스, 4초)": dict(missing_confirm_seconds=4, person_source="object"),
 }
 
 
@@ -48,8 +51,8 @@ def parse_groups(text):
     groups = {}
     for part in (text or "").split():
         name, rng = part.split("=")
-        a, b = rng.split("-")
-        for n in range(int(a), int(b) + 1):
+        a, _, b = rng.partition("-")          # 'idle=23'처럼 번호 하나도 됨
+        for n in range(int(a), int(b or a) + 1):
             groups[n] = name
     return groups
 
@@ -69,19 +72,26 @@ def frames(cap, times, mirror):
         idx += 1
 
 
-def run_object(cap, times, mirror):
-    detector = ObjectDetector(TARGET_OBJECTS, conf_thresholds={"book": 0.15})
-    variants, use_persons = {}, set()
+def run_object(cap, times, mirror, model_path=None):
+    """model_path: 물건 검출 모델 (안 넘기면 .env의 OBJECT_MODEL). 확신도 기준은 모델에 맞춰 자동."""
+    detector = ObjectDetector(TARGET_OBJECTS, model_path=model_path)
+    print(f"  물건 검출 모델: {detector.model_path}, 확신도 기준: {detector.conf_thresholds}")
+    pose = PoseEstimator()
+    variants, source = {}, {}
     for name, kw in OBJECT_VARIANTS.items():
         kw = dict(kw)
-        if kw.pop("use_person_boxes", False):
-            use_persons.add(name)
+        src = kw.pop("person_source", None)
+        if src == "object" and not detector.has_person:
+            print(f"  ({name}: 이 모델에는 person 클래스가 없어 건너뜀)")
+            continue
+        source[name] = src
         variants[name] = ObjectDisplacementDetector(TARGET_OBJECTS, **kw)
     events = {name: [] for name in variants}
     for t, frame in frames(cap, times, mirror):
-        dets, persons = detector.detect_all(frame)   # 검출은 한 번, 판단은 여러 로직에 동시에
+        dets, obj_persons = detector.detect_all(frame)   # 검출은 한 번, 판단은 여러 로직에 동시에
+        boxes = {"pose": [p["bbox"] for p in pose.estimate(frame)], "object": obj_persons, None: None}
         for name, det in variants.items():
-            res = det.update(dets, now=t, person_boxes=persons if name in use_persons else None)
+            res = det.update(dets, now=t, person_boxes=boxes[source[name]])
             if res["calibrating"]:
                 continue
             for cls, r in res["results"].items():
@@ -200,17 +210,19 @@ def main():
     ap.add_argument("--groups", default="", help="시도 번호 그룹 예: 'desk=1-14 out=15-24'")
     ap.add_argument("--no-mirror", action="store_true", help="좌우 반전 끄기")
     ap.add_argument("--tag", default="", help="결과 폴더 이름 뒤에 붙일 표시 (예: dev_check -> 개발용 확인)")
+    ap.add_argument("--object-model", default="", help="object 작업: 물건 검출 모델 (기본: .env의 OBJECT_MODEL)")
     ap.add_argument("--vlm", action="store_true", help="people 작업: '규칙만' vs '규칙 + VLM' 비교 (로컬 Ollama 필요)")
     args = ap.parse_args()
 
     d = Path(args.rec_dir)
     times = [float(r["t"]) for r in load_csv(d / "frames.csv")]
     marks = load_csv(d / "marks.csv")
+    groups = parse_groups(args.groups)   # 영상 처리 전에 먼저 읽어서, 형식이 틀리면 바로 멈추게
     cap = cv2.VideoCapture(str(d / "video.mp4"))
     print(f"[재생 평가{' / ' + args.tag if args.tag else ''}] {d.name}  프레임 {len(times)}, 시도 {len(marks)}개, 작업 {args.task}")
 
     if args.task == "object":
-        events = run_object(cap, times, not args.no_mirror)
+        events = run_object(cap, times, not args.no_mirror, args.object_model or None)
     else:
         if not args.roi:
             raise SystemExit("people 작업은 --roi 좌표가 필요합니다.")
@@ -221,7 +233,7 @@ def main():
     # 녹화 폴더(data/recordings)는 건드리지 않도록 결과는 따로 저장
     out_dir = RESULT_DIR / (f"{d.name}_{args.tag}" if args.tag else d.name)
     out_dir.mkdir(parents=True, exist_ok=True)
-    score(marks, events, parse_groups(args.groups), out_dir)
+    score(marks, events, groups, out_dir)
 
     if args.task == "people" and args.vlm:
         print(f"\nVLM 호출 {len(vlm_calls)}회 ('예' {sum(c['lying'] is True for c in vlm_calls)}회, "
