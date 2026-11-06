@@ -147,3 +147,31 @@ runs/finetune/<이름>/weights/best.pt   # 학습 결과
 4. 데이터셋 만들기: `python -m src.tools.build_dataset --train eval_object_home_20261103_144117_v3 ft_home_s3_room_<날짜_시각> --val ft_home_s2_living_<날짜_시각>`
    - 세션별로 확인한 장수, 책 있는 장수, 책 없는 장수, 빠진 장수(안 봄, 라벨 오류)를 출력
 5. 학습: `yolo detect train model=yolov8s.pt data=data/finetune/dataset/dataset.yaml epochs=100 imgsz=640 batch=16 device=0 patience=20 project=runs/finetune name=book_laptop_v1`
+
+### 학교 검출 평가 (`detect_eval`, 책만)
+손으로 단 학교 정답 라벨(`test_school`, 169장 중 책 있는 이미지 158장)로 모델의 책 검출을 채점한다. 노트북은 학교 영상에 없어서 채점하지 않는다.
+```
+python -m src.experiments.detect_eval --tag baseline                                          # 기본 모델 (기준선)
+python -m src.experiments.detect_eval --model runs/finetune/<이름>/weights/best.pt --tag <이름>   # 파인튜닝 모델
+```
+- 시스템과 같은 조건:
+  - 화면을 좌우 반전해서 검출하고, 박스를 원본 좌표로 되돌려 정답과 비교한다.
+  - 책 확신도는 모델 옆 `thresholds.json` 값을 쓰고, 없으면 0.15를 쓴다.
+- 맞음 기준: 정답과 IoU 0.5 이상. 정답 하나에는 박스 하나만 짝짓고, 남은 박스는 "잘못 찾은 박스"로 센다.
+- 두 가지로 센다:
+  - **시스템**: 프레임마다 확신도가 가장 높은 책 1개만 본다. 물건 이동 판단이 실제로 쓰는 박스다.
+  - **모든 박스**: 기준을 넘은 책 박스를 모두 본다.
+- 단계 구분 (marks.csv 기준):
+  - 이동: 첫 정상 시도(460.1초) 전, 92장
+  - 정상 동작: 그 뒤 #23 제외, 40장
+  - 가만히: #23, 37장
+- 결과는 `data/detect_eval/<녹화>_<모델>_<tag>/`에 저장한다(summary.csv, per_image.csv, info.json). 같은 이름이 있으면 덮어쓰지 않는다.
+
+**기준선(기본 모델)**: yolov8s, 책 0.15, IoU 0.5, 반전 켬. 커밋 시점의 결과.
+
+| 단계 | 이미지 | 정답 책 | 재현율 (시스템 = 모든 박스) | 잘못 찾은 박스 |
+|---|---|---|---|---|
+| 이동 | 92 | 82 | 42/82 = 0.512 | 0 |
+| 정상 동작 | 40 | 39 | 1/39 = 0.026 | 0 |
+| 가만히 3분 | 37 | 37 | **0/37 = 0.0** | 0 |
+| 전체 | 169 | 158 | 43/158 = 0.272 | 0 |

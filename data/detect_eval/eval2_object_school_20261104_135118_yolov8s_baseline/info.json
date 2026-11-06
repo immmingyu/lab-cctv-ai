@@ -1,0 +1,12 @@
+{
+  "tag": "baseline",
+  "label": "기준선(기본 모델)",
+  "model": "yolov8s.pt",
+  "book_conf": 0.15,
+  "iou": 0.5,
+  "mirror": true,
+  "phases": "이동 < 460.1초, 가만히 = #23 600.5~783.0초, 나머지 정상 동작",
+  "images": 169,
+  "commit": "526f3e5",
+  "time": "2026-11-06 18:35:28"
+}
