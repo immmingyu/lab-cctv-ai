@@ -93,7 +93,7 @@ LLM 시각 표시 비교 평가: `python -m src.experiments.llm_eval.run_eval --
 ### 세션 계획 (2026-11-05 확정, 학습/검증은 세션 단위)
 | 세션 | 녹화 | 내용 | 용도 |
 |---|---|---|---|
-| 1 | `eval_object_home_20261103_144117` (기존) | 책 이동, 손으로 가리기 장면이 많음 | 학습 |
+| 1 | `eval_object_home_20261103_144117` (기존), 프레임 폴더 `eval_object_home_20261103_144117_v3` | 책 이동, 손으로 가리기 장면이 많음 | 학습 |
 | 2 | 새로 촬영 | 높은 각도, 밤 조명, 작게 보이는 책, 노트북 | **검증** (책 확신도 F1 기준도 여기서) |
 | 3 | 새로 촬영 | 다른 방, 다른 책들, 비슷한 물건 | 학습 |
 
@@ -107,7 +107,7 @@ LLM 시각 표시 비교 평가: `python -m src.experiments.llm_eval.run_eval --
 - 책 놓인 모양: 눕힘, 세움, 펼침 / 책상 위 여러 위치 / 손에 일부 가려진 장면
 - 화면에서 **작게** 보이는 책 (카메라에서 먼 곳)
 - 노트북 (열림, 닫힘)
-- 책이 없는 장면: 빈 책상 + **비슷한 물건만 있는 장면** (노트, 종이, 태블릿, 휴대폰) — 이런 장면은 라벨 없이 그대로 둠 (틀리게 찾지 않도록 배우는 용도)
+- 책이 없는 장면: 빈 책상 + **비슷한 물건만 있는 장면** (노트, 종이, 태블릿, 휴대폰) — 이런 장면은 박스 없이 **passed로 확인 표시** (틀리게 찾지 않도록 배우는 용도, 확인 표시가 없으면 학습에서 빠짐)
 - 촬영은 **2~3개 세션**으로 나눔 (예: 낮, 밤, 다른 방). 학습/검증은 **세션 단위로** 나눔 (같은 세션의 프레임이 양쪽에 섞이지 않게)
 
 ### 라벨링 규칙 (학습 데이터와 학교 평가 데이터에 똑같이 적용)
@@ -120,7 +120,8 @@ LLM 시각 표시 비교 평가: `python -m src.experiments.llm_eval.run_eval --
 ### 폴더 구조 (`data/finetune/`, git에 올리지 않음 — 사람 얼굴 포함)
 ```
 data/finetune/
-  frames/<녹화이름>/          # extract_frames가 뽑은 프레임 (+ X-AnyLabeling 라벨 .txt, classes.txt)
+  frames/<세션 폴더>/          # extract_frames가 뽑은 프레임 + X-AnyLabeling .json (확인한 이미지에만 생김)
+  labels/<세션 폴더>/          # X-AnyLabeling YOLO 내보내기 .txt (안 본 이미지도 빈 .txt로 생김)
   dataset/                     # build_dataset가 만든 학습용 (YOLO 형식)
     images/train, images/val
     labels/train, labels/val
@@ -132,6 +133,11 @@ runs/finetune/<이름>/weights/best.pt   # 학습 결과
 ### 순서
 1. 집에서 세션별로 녹화: `python -m src.tools.recorder --name ft_home_s1_day` (세션마다 이름을 다르게)
 2. 프레임 뽑기: `python -m src.tools.extract_frames data/recordings/<녹화이름> --every 1.5`
-3. X-AnyLabeling으로 `data/finetune/frames/<녹화이름>/` 라벨링 (YOLO 형식, 클래스 순서 book, laptop)
-4. 데이터셋 만들기: `python -m src.tools.build_dataset --train eval_object_home_20261103_144117 <세션3 녹화> --val <세션2 녹화>`
+3. X-AnyLabeling으로 `data/finetune/frames/<세션 폴더>/` 라벨링 (클래스 이름 book, laptop)
+   - 책/노트북이 있으면 사각형으로 라벨, 없으면 박스 없이 **passed** — 둘 다 그 이미지에 .json이 생겨 "확인한 이미지"가 됨
+   - **.json이 없는 이미지는 안 본 것으로 보고 학습에서 뺀다** (내보내기가 만든 빈 .txt가 있어도)
+   - 라벨링이 **다 끝나면 마지막에 한 번** YOLO 형식으로 내보내기 → `data/finetune/labels/<세션 폴더>/`
+     (중간에 내보낸 뒤 라벨을 고쳤으면 다시 내보내기. build_dataset이 .json 박스와 .txt 줄이 다르면 그 이미지를 빼고 알려줌)
+4. 데이터셋 만들기: `python -m src.tools.build_dataset --train eval_object_home_20261103_144117_v3 <세션3 폴더> --val <세션2 폴더>`
+   - 세션별로 확인한 장수, 책 있는 장수, 책 없는 장수, 빠진 장수(안 봄, 라벨 오류)를 출력
 5. 학습: `yolo detect train model=yolov8s.pt data=data/finetune/dataset/dataset.yaml epochs=100 imgsz=640 batch=16 device=0 patience=20 project=runs/finetune name=book_laptop_v1`

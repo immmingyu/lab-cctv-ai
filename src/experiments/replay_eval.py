@@ -87,6 +87,8 @@ def training_note(rec_dir, model_path):
         if info.exists():
             sj = json.loads(info.read_text(encoding="utf-8"))
             sessions = set(sj["train"]) | set(sj["val"])
+            recs = sj.get("recordings", {})   # 세션 폴더가 _v3처럼 달라도 원래 녹화 이름으로 비교
+            sessions |= set(recs.get("train", [])) | set(recs.get("val", []))
             places = {place_of(Path("data/recordings") / n) for n in sessions} - {None} or {"home"}
     name = Path(rec_dir).name
     if name in sessions:
