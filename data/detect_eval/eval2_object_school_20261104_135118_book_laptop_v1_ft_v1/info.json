@@ -1,0 +1,12 @@
+{
+  "tag": "ft_v1",
+  "label": "ft_v1",
+  "model": "runs/finetune/book_laptop_v1/weights/best.pt",
+  "book_conf": 0.78,
+  "iou": 0.5,
+  "mirror": true,
+  "phases": "이동 < 460.1초, 가만히 = #23 600.5~783.0초, 나머지 정상 동작",
+  "images": 169,
+  "commit": "8e5981e",
+  "time": "2026-11-06 22:02:01"
+}
