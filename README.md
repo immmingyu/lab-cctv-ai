@@ -126,7 +126,9 @@ data/finetune/
     images/train, images/val
     labels/train, labels/val
     dataset.yaml
-  school_test/<녹화이름>/      # 학교 평가용 프레임과 라벨 (학습에 쓰지 않음)
+  test_school/                 # 학교 평가용 (학습에 절대 쓰지 않음, build_dataset가 이 경로를 거부)
+    frames/<녹화이름>/         #   5초 간격, 건너뛰기 없음 (가만히 둔 구간 포함) + classes.txt
+    labels/<녹화이름>/         #   X-AnyLabeling YOLO 내보내기 위치
 runs/finetune/<이름>/weights/best.pt   # 학습 결과
 ```
 

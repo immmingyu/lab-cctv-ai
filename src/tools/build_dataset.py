@@ -10,7 +10,13 @@ from src.tools.extract_frames import CLASSES, OUT_ROOT as FRAMES_ROOT
 
 LABELS_ROOT = Path("data/finetune/labels")      # X-AnyLabeling YOLO 내보내기 위치 (세션 폴더 이름 그대로)
 DATASET_ROOT = Path("data/finetune/dataset")
-SCHOOL_TEST_ROOT = Path("data/finetune/school_test")
+SCHOOL_TEST_ROOT = Path("data/finetune/test_school")   # 학교 평가용 (학습 절대 금지)
+TEST_DIR_NAMES = {"test_school", "school_test"}        # 경로 어디에든 이 폴더가 있으면 거부
+
+
+def is_test_path(p):
+    """학교 평가 폴더 안의 경로인지 (상대/절대 경로, 다른 --labels-root 모두 검사)."""
+    return any(part.lower() in TEST_DIR_NAMES for part in Path(p).resolve().parts)
 FRAME_NAME = re.compile(r"^(.*)_f\d{6}_t[\d.]+$")   # extract_frames 파일 이름: <녹화이름>_f000123_t00004.1
 
 
@@ -39,7 +45,7 @@ def check_session(d, labels_dir):
     """세션 폴더 검사. 문제가 있으면 바로 멈춤 (학습 데이터가 잘못 섞이는 걸 막기 위함)."""
     if not d.is_dir():
         raise SystemExit(f"세션 폴더가 없습니다: {d}")
-    if "school" in d.name.lower() or SCHOOL_TEST_ROOT.resolve() in d.resolve().parents:
+    if "school" in d.name.lower() or is_test_path(d) or is_test_path(labels_dir):
         raise SystemExit(f"학교 영상은 평가 전용이라 학습 데이터에 넣을 수 없습니다: {d}")
     if any("school" in r.lower() for r in recording_of(d)):
         raise SystemExit(f"학교 녹화에서 뽑은 프레임이 있습니다: {d}")
@@ -123,16 +129,18 @@ def collect(d, labels_dir):
 def main():
     args = parse_args()
     labels_root = Path(args.labels_root)
+    if is_test_path(labels_root) or is_test_path(args.out):
+        raise SystemExit(f"학교 평가 폴더({SCHOOL_TEST_ROOT})는 학습 데이터셋 도구에서 읽거나 쓰지 않습니다.")
     train = [session_dir(s) for s in args.train]
     val = [session_dir(s) for s in args.val]
+    for d in train + val:                   # 학교 평가 폴더는 파일 목록도 보기 전에 거부
+        check_session(d, labels_root / d.name)
     overlap = {d.resolve() for d in train} & {d.resolve() for d in val}
     if overlap:
         raise SystemExit(f"같은 세션이 학습과 검증에 모두 있습니다: {[p.name for p in overlap]}")
     rec_overlap = {r for d in train for r in recording_of(d)} & {r for d in val for r in recording_of(d)}
     if rec_overlap:
         raise SystemExit(f"같은 녹화에서 뽑은 프레임이 학습과 검증에 모두 있습니다: {sorted(rec_overlap)}")
-    for d in train + val:
-        check_session(d, labels_root / d.name)
 
     out = Path(args.out)
     if out.exists():
