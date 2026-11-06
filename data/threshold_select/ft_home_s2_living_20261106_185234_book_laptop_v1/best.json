@@ -1,0 +1,19 @@
+{
+  "model": "runs/finetune/book_laptop_v1/weights/best.pt",
+  "session": "ft_home_s2_living_20261106_185234",
+  "images": 118,
+  "book_boxes": 218,
+  "iou": 0.5,
+  "mirror": true,
+  "best": {
+    "기준": 0.78,
+    "맞힘": 154,
+    "잘못 찾음": 25,
+    "놓침": 64,
+    "정밀도": 0.8603,
+    "재현율": 0.7064,
+    "F1": 0.7758
+  },
+  "rule": "F1 최고, 같으면 낮은 기준 (0.01~0.95, 0.01 간격)",
+  "time": "2026-11-06 21:59:42"
+}

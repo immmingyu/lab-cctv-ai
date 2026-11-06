@@ -86,8 +86,8 @@ LLM 시각 표시 비교 평가: `python -m src.experiments.llm_eval.run_eval --
 | 사람 박스 출처 | Pose 모델(yolov8n-pose)의 사람 박스. 기본 모델과 파인튜닝 모델 모두 같음 (차이가 물건 검출에서만 나오게). 11/4 결과와 잇기 위해 "기본 + yolov8s 사람 박스"는 참고 설정으로만 같이 냄 |
 | 클래스 | `book`, `laptop` 2개 (이름 그대로, 이 순서) |
 | 책 확신도 기준 | 기본 모델: 0.15 유지. 파인튜닝 모델: 집 검증 데이터에서 F1이 가장 높은 값 → 학교 영상 평가 **전에** 아래 칸에 기록 |
-| 파인튜닝 모델 책 확신도 (확정값) | (학습 후 기록) |
-| 기본 모델 책 확신도, 다시 고른 값 (확정값, 비교용) | (세션 2 라벨링 후 기록) |
+| 파인튜닝 모델 책 확신도 (확정값) | **0.78** (`book_laptop_v1`, 세션 2 F1 0.7758 / 정밀도 0.860 / 재현율 0.706). 2026-11-06 학교 평가 전에 확정. weights 폴더 `thresholds.json`에 저장 |
+| 기본 모델 책 확신도, 다시 고른 값 (확정값, 비교용) | **0.14** (yolov8s, 세션 2 F1 0.6075 / 정밀도 0.533 / 재현율 0.706. 참고로 0.15의 F1은 0.6004). 2026-11-06 학교 평가 전에 확정. 시스템 기본값은 0.15 유지 |
 | 모델 교체 | `.env`의 `OBJECT_MODEL` 한 줄 (기본 `yolov8s.pt`) |
 | 라벨링 도구 | X-AnyLabeling (설치형, 로컬에서만 동작) |
 
@@ -168,6 +168,29 @@ runs/finetune/<이름>/weights/best.pt   # 학습 결과
 4. 데이터셋 만들기: `python -m src.tools.build_dataset --train eval_object_home_20261103_144117_v3 ft_home_s3_room_20261106_191008 --val ft_home_s2_living_20261106_185234`
    - 세션별로 확인한 장수, 책 있는 장수, 책 없는 장수, 빠진 장수(안 봄, 라벨 오류)를 출력
 5. 학습: `yolo detect train model=yolov8s.pt data=data/finetune/dataset/dataset.yaml epochs=100 imgsz=640 batch=16 device=0 patience=20 project=runs/finetune name=book_laptop_v1`
+   - ultralytics 8.4는 결과를 `runs/detect/runs/finetune/<이름>`에 저장한다. 학습 뒤 `runs/finetune/<이름>`으로 옮긴다.
+6. 책 확신도 고르기 (기본 모델, 파인튜닝 모델 같은 방법, 세션 2만 사용):
+   `python -m src.experiments.pick_threshold --model yolov8s.pt`,
+   `python -m src.experiments.pick_threshold --model runs/finetune/<이름>/weights/best.pt --write`
+   - 반전해서 검출, IoU 0.5, 기준 0.01~0.95 중 F1 최고 (같으면 낮은 기준). 결과는 `data/threshold_select/`
+   - `--write`는 파인튜닝 모델에만 동작한다 (`thresholds.json`). 기본 모델은 거부한다.
+
+### 학습 기록: `book_laptop_v1` (2026-11-06)
+| 항목 | 내용 |
+|---|---|
+| 데이터 | 학습: 세션 1(305장) + 세션 3(165장) = 470장 / 검증: 세션 2(118장, 책 박스 218개, 노트북 118개) |
+| 학습 | 36에폭에서 조기 종료 (patience 20), best.pt = 16에폭 |
+| ultralytics 검증 (반전 없음) | book 정밀도 0.913, 재현율 0.862, mAP50 0.901 / laptop 재현율 0 (세션 2 노트북은 화면에 고정된 Mac북 하나라 참고만) |
+| 세션 2, 시스템 조건(반전) 0.78 | 맞힘 154, 잘못 찾음 25, 놓침 64. 같은 기준에서 반전하지 않으면 잘못 찾음 5 → **반전한 화면에서 정답과 안 겹치는 박스가 늘어남** (규칙은 시스템과 같은 반전 조건으로 고정했으므로 그대로 씀) |
+| 검증 세션 특이점 | 세션 2에는 책 없는 이미지가 0장. 잘못 찾은 박스는 책이 있는 이미지 안에서만 셈 |
+
+비교 B, C의 명령 (학교):
+```
+python -m src.experiments.detect_eval --conf 0.14 --tag base_f1                                          # B
+python -m src.experiments.detect_eval --model runs/finetune/book_laptop_v1/weights/best.pt --tag ft_v1      # C (thresholds.json 0.78)
+python -m src.experiments.replay_eval data/recordings/eval2_object_school_20261104_135118 --task object --book-conf 0.14 --tag base_f1 --groups "desk=1-5 out=6-10 carry=11-15 touch=16-19 cover=20-22 idle=23 pass=24-26"
+python -m src.experiments.replay_eval data/recordings/eval2_object_school_20261104_135118 --task object --object-model runs/finetune/book_laptop_v1/weights/best.pt --tag ft_v1 --groups "desk=1-5 out=6-10 carry=11-15 touch=16-19 cover=20-22 idle=23 pass=24-26"
+```
 
 ### 학교 검출 평가 (`detect_eval`, 책만)
 손으로 단 학교 정답 라벨(`test_school`, 169장 중 책 있는 이미지 158장)로 모델의 책 검출을 채점한다. 노트북은 학교 영상에 없어서 채점하지 않는다.

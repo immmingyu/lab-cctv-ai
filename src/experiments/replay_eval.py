@@ -7,7 +7,7 @@ from pathlib import Path
 import cv2
 
 from src.config import OBJECT_MODEL
-from src.detection.object_detector import ObjectDetector
+from src.detection.object_detector import ObjectDetector, conf_thresholds_for
 from src.detection.pose_estimator import PoseEstimator
 from src.detection.vlm_client import VlmClient, crop_person
 from src.events.fall_detector import FallDetector, touches_edge
@@ -113,9 +113,15 @@ def frames(cap, times, mirror):
         idx += 1
 
 
-def run_object(cap, times, mirror, model_path=None):
-    """model_path: 물건 검출 모델 (안 넘기면 .env의 OBJECT_MODEL). 확신도 기준은 모델에 맞춰 자동."""
-    detector = ObjectDetector(TARGET_OBJECTS, model_path=model_path)
+def run_object(cap, times, mirror, model_path=None, book_conf=None):
+    """
+    model_path: 물건 검출 모델 (안 넘기면 .env의 OBJECT_MODEL). 확신도 기준은 모델에 맞춰 자동.
+    book_conf: 책 확신도를 직접 지정 (비교 평가용. 시스템 기본값은 바꾸지 않음)
+    """
+    thresholds = None
+    if book_conf is not None:
+        thresholds = {**conf_thresholds_for(model_path or OBJECT_MODEL), "book": book_conf}
+    detector = ObjectDetector(TARGET_OBJECTS, model_path=model_path, conf_thresholds=thresholds)
     print(f"  물건 검출 모델: {detector.model_path}, 확신도 기준: {detector.conf_thresholds}")
     pose = PoseEstimator()
     variants, source = {}, {}
@@ -252,6 +258,8 @@ def main():
     ap.add_argument("--no-mirror", action="store_true", help="좌우 반전 끄기")
     ap.add_argument("--tag", default="", help="결과 폴더 이름 뒤에 붙일 표시 (예: dev_check -> 개발용 확인)")
     ap.add_argument("--object-model", default="", help="object 작업: 물건 검출 모델 (기본: .env의 OBJECT_MODEL)")
+    ap.add_argument("--book-conf", type=float, default=None,
+                    help="object 작업: 책 확신도 직접 지정 (비교 평가용, 안 주면 모델 기본값)")
     ap.add_argument("--vlm", action="store_true", help="people 작업: '규칙만' vs '규칙 + VLM' 비교 (로컬 Ollama 필요)")
     args = ap.parse_args()
 
@@ -266,7 +274,7 @@ def main():
     print(f"[재생 평가{' / ' + args.tag if args.tag else ''}] {d.name}  프레임 {len(times)}, 시도 {len(marks)}개, 작업 {args.task}")
 
     if args.task == "object":
-        events = run_object(cap, times, not args.no_mirror, args.object_model or None)
+        events = run_object(cap, times, not args.no_mirror, args.object_model or None, args.book_conf)
     else:
         if not args.roi:
             raise SystemExit("people 작업은 --roi 좌표가 필요합니다.")
@@ -279,6 +287,12 @@ def main():
     if note:
         out_dir = out_dir.with_name(out_dir.name + "_ref_trainplace")
     out_dir.mkdir(parents=True, exist_ok=True)
+    if args.task == "object":                # 어떤 모델, 어떤 기준으로 돌렸는지 결과와 함께 남김
+        model = args.object_model or OBJECT_MODEL
+        conf = {**conf_thresholds_for(model), **({"book": args.book_conf} if args.book_conf is not None else {})}
+        (out_dir / "run_info.txt").write_text(
+            f"물건 검출 모델: {model}\n확신도 기준: {conf}"
+            f"{' (--book-conf로 지정)' if args.book_conf is not None else ''}\n", encoding="utf-8")
     if note:
         (out_dir / "notes.txt").write_text(
             f"[{note}]\n물건 검출 모델: {args.object_model or OBJECT_MODEL}\n"
