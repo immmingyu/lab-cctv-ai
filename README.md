@@ -90,12 +90,16 @@ LLM 시각 표시 비교 평가: `python -m src.experiments.llm_eval.run_eval --
 | 모델 교체 | `.env`의 `OBJECT_MODEL` 한 줄 (기본 `yolov8s.pt`) |
 | 라벨링 도구 | X-AnyLabeling (설치형, 로컬에서만 동작) |
 
-### 세션 계획 (2026-11-05 확정, 학습/검증은 세션 단위)
-| 세션 | 녹화 | 내용 | 용도 |
-|---|---|---|---|
-| 1 | `eval_object_home_20261103_144117` (기존), 프레임 폴더 `eval_object_home_20261103_144117_v3` | 책 이동, 손으로 가리기 장면이 많음 | 학습 |
-| 2 | 새로 촬영 | 높은 각도, 밤 조명, 작게 보이는 책, 노트북 | **검증** (책 확신도 F1 기준도 여기서) |
-| 3 | 새로 촬영 | 다른 방, 다른 책들, 비슷한 물건 | 학습 |
+### 세션 계획 (2026-11-05 확정 → 2026-11-06 변경: 세션 2, 3 촬영 결과를 보기 전에 정함. 학습/검증은 세션 단위)
+| 세션 | 장소 | 녹화 | 내용 | 용도 |
+|---|---|---|---|---|
+| 1 | 집 | `eval_object_home_20261103_144117` (기존), 프레임 폴더 `eval_object_home_20261103_144117_v3` | 책 이동, 손으로 가리기 장면이 많음 | 학습 |
+| 2 | 거실 | `ft_home_s2_living_<날짜_시각>` (새로 촬영) | 감시 대상 책(학교에서 쓴 책) 포함. Mac북으로 녹화해서 **노트북은 화면에 고정된 상태로만** 나옴 | **검증** (책 확신도 F1 기준도 여기서) |
+| 3 | 방 | `ft_home_s3_room_<날짜_시각>` (새로 촬영) | 감시 대상 책(학교에서 쓴 책) 포함. **노트북을 다양하게** (열림, 닫힘, 위치, 각도) | 학습 |
+
+- 학습: 세션 1, 3 / 검증: 세션 2 (변경 없음)
+- 감시 대상 책 = 학교 시험 영상에서 쓴 책. 세션 2, 3 모두에 넣는다.
+- 세션 2의 노트북은 한 자리에 고정이라, 검증 데이터의 노트북 결과는 다양한 모습을 대표하지 못한다 (참고로만 본다). 확신도 기준을 정하는 대상은 책뿐이라 영향이 없다.
 
 - `eval_people_home_p1_20261103_150718`은 **제외**: 책이 화면에 없음 (물건 영상의 책 자리가 비어 있고, 기본 모델이 화면 오른쪽 끝에서 '책'으로 찾은 6.5%는 책이 아닌 다른 물건)
 - 집 영상이 학습에 들어가므로, 파인튜닝 모델로 집 영상을 재생 평가한 결과는 **참고용(학습에 쓴 장소)** 으로 자동 표시 (결과 폴더 이름 `_ref_trainplace`, notes.txt). 성능 비교는 학교 시험 영상으로만 한다.
@@ -133,13 +137,13 @@ runs/finetune/<이름>/weights/best.pt   # 학습 결과
 ```
 
 ### 순서
-1. 집에서 세션별로 녹화: `python -m src.tools.recorder --name ft_home_s1_day` (세션마다 이름을 다르게)
+1. 집에서 세션별로 녹화: `python -m src.tools.recorder --name ft_home_s2_living` / `--name ft_home_s3_room` (폴더 이름 뒤에 날짜_시각이 붙음)
 2. 프레임 뽑기: `python -m src.tools.extract_frames data/recordings/<녹화이름> --every 1.5`
 3. X-AnyLabeling으로 `data/finetune/frames/<세션 폴더>/` 라벨링 (클래스 이름 book, laptop)
    - 책/노트북이 있으면 사각형으로 라벨, 없으면 박스 없이 **passed** — 둘 다 그 이미지에 .json이 생겨 "확인한 이미지"가 됨
    - **.json이 없는 이미지는 안 본 것으로 보고 학습에서 뺀다** (내보내기가 만든 빈 .txt가 있어도)
    - 라벨링이 **다 끝나면 마지막에 한 번** YOLO 형식으로 내보내기 → `data/finetune/labels/<세션 폴더>/`
      (중간에 내보낸 뒤 라벨을 고쳤으면 다시 내보내기. build_dataset이 .json 박스와 .txt 줄이 다르면 그 이미지를 빼고 알려줌)
-4. 데이터셋 만들기: `python -m src.tools.build_dataset --train eval_object_home_20261103_144117_v3 <세션3 폴더> --val <세션2 폴더>`
+4. 데이터셋 만들기: `python -m src.tools.build_dataset --train eval_object_home_20261103_144117_v3 ft_home_s3_room_<날짜_시각> --val ft_home_s2_living_<날짜_시각>`
    - 세션별로 확인한 장수, 책 있는 장수, 책 없는 장수, 빠진 장수(안 봄, 라벨 오류)를 출력
 5. 학습: `yolo detect train model=yolov8s.pt data=data/finetune/dataset/dataset.yaml epochs=100 imgsz=640 batch=16 device=0 patience=20 project=runs/finetune name=book_laptop_v1`
