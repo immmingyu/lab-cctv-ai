@@ -254,3 +254,22 @@ python -m src.experiments.detect_eval --model runs/finetune/<이름>/weights/bes
   - 학교 시험 영상 1개(시도 26개)의 결과다.
   - 감시 대상 책(학교에서 쓴 책)은 집 학습 데이터에도 들어 있다. 그래서 "같은 책, 처음 보는 장소"에서의 결과다.
   - 결과 폴더: `data/detect_eval/*_{baseline,base_f1,ft_v1}`, `data/replay_results/eval2_object_school_20261104_135118_{base,base_f1,ft_v1}` (재생 평가 결과는 git 밖).
+
+## 시연 영상 만들기 (`render_video`, 포스터 QR, 전시회 비상 시연용)
+녹화 영상에 실시간 화면(`main.py`)과 같은 판단 결과를 그려서 H.264 MP4로 저장한다. 평가 도구가 아니며, 판단 설정은 실시간 시스템 그대로 쓴다.
+```
+python -m src.tools.render_video data/recordings/demo_school_20261104_145408 --roi "271,306 267,359 388,364 380,315" --object-model runs/finetune/book_laptop_v1/weights/best.pt --vlm
+python -m src.tools.render_video ... (위와 같음) --clips "4-33 40-62 84-100" --name highlight     # 핵심 장면만
+```
+- **그리는 것:**
+  - 사람 박스, 관절, 자세와 위험도, 제한 구역, 책과 노트북 박스와 상태, EDGE (`main.py`와 같은 그림)
+  - 이벤트·VLM 결과 한글 배너 3초 (아래쪽 가운데)
+  - 영상 시각 (오른쪽 위)
+- **시각:**
+  - `frames.csv` 기준이고, 판단은 영상 처음부터 끝까지 돌린다.
+  - `--start`/`--end`/`--clips`는 저장할 구간만 고른다. 그래서 물건 원래 위치와 정지 시간이 실제와 같다.
+- **VLM:**
+  - 처리 중에는 답을 기다린다(재생 평가와 같음). 실시간에서는 응답 시간(약 3초)만큼 배너가 늦게 뜬다.
+  - 시작 전에 준비 호출을 한 번 한다. 첫 호출에서 모델을 올리느라 시간 초과가 나는 것을 막기 위해서다.
+- **인코딩:** ffmpeg(PATH 또는 `imageio-ffmpeg`)로 H.264/yuv420p/faststart. 없으면 mp4v로 저장한다.
+- **결과 위치:** `data/demo_videos/<녹화>/` (git 밖). 이벤트 시각 목록은 `*.events.csv`에 원래 영상 시각과 결과 영상 시각으로 남는다.

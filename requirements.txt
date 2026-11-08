@@ -7,3 +7,5 @@ uvicorn==0.54.0
 requests
 python-dotenv
 # anthropic   # Claude API로 전환할 때만 설치
+# 시연 영상 만들기 (src/tools/render_video.py): H.264 인코딩용 ffmpeg 포함
+imageio-ffmpeg
