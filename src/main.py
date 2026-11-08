@@ -1,6 +1,7 @@
 import argparse
 import csv
 import json
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +17,7 @@ from src.events.fall_detector import FallDetector, touches_edge
 from src.events.intrusion_detector import IntrusionDetector
 from src.events.object_displacement_detector import ObjectDisplacementDetector
 from src.events.stillness_trigger import StillnessTrigger
+from src.tools.warmup import warm_all
 from src.schemas.event_schema import (
     create_displacement_event,
     create_fall_event,
@@ -132,6 +134,8 @@ def main():
     vlm = VlmClient() if use_vlm else None
     vlm_pool = ThreadPoolExecutor(max_workers=1) if use_vlm else None
     vlm_jobs = []   # [(future, track_id, bbox, 정지 시간)]
+    # 준비 호출: VLM, LLM을 한 번씩 미리 불러둠 (첫 질문 시간 초과 방지). 별도 스레드라 영상은 바로 시작
+    threading.Thread(target=warm_all, kwargs={"use_vlm": use_vlm}, daemon=True).start()
     intrusion_detector = IntrusionDetector(ROI_POINTS, stay_seconds_threshold=5)
     # 모델은 .env의 OBJECT_MODEL, 확신도 기준은 모델에 맞춰 (기본 book 0.15)
     object_detector = ObjectDetector(TARGET_OBJECTS) if show_object else None

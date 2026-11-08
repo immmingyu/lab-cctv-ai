@@ -124,6 +124,14 @@ for NEED in "exaone3.5:7.8b" "qwen3-vl:4b-instruct"; do
   esac
 done
 
+# 준비 호출: VLM, LLM을 한 번씩 미리 불러둠 (첫 질문 시간 초과 방지, 실패해도 계속 진행)
+step "VLM, LLM 미리 불러오기 (처음에는 1분 정도 걸릴 수 있음)"
+if python -m src.tools.warmup $VLM_ARG; then
+  ok "미리 불러오기 끝"
+else
+  info "주의: 미리 불러오기에 실패했습니다. 첫 질문이 늦을 수 있지만 계속 진행합니다."
+fi
+
 # ---------- 2) 백엔드 ----------
 step "백엔드(uvicorn) 실행"
 if url_ok "$BASE_URL/health"; then

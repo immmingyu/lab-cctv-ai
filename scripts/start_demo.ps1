@@ -129,6 +129,14 @@ try {
         }
     } catch { }
 
+    # 준비 호출: VLM, LLM을 한 번씩 미리 불러둠 (첫 질문 시간 초과 방지, 실패해도 계속 진행)
+    Write-Step "VLM, LLM 미리 불러오기 (처음에는 1분 정도 걸릴 수 있음)"
+    $warmArgs = @("-m", "src.tools.warmup")
+    if ($NoVlm) { $warmArgs += "--no-vlm" }
+    & python @warmArgs
+    if ($LASTEXITCODE -eq 0) { Write-Ok "미리 불러오기 끝" }
+    else { Write-Info "주의: 미리 불러오기에 실패했습니다. 첫 질문이 늦을 수 있지만 계속 진행합니다." }
+
     # ---------- 2) 백엔드 ----------
     Write-Step "백엔드(uvicorn) 실행"
     if (Test-Url "$BaseUrl/health") {
