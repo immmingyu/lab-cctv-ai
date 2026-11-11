@@ -1,0 +1,9 @@
+[시험용 12문항 최종 평가 - 키 폴더]
+※ 채점이 끝날 때까지 이 폴더(answer_key.csv, raw.csv, 이 파일)는 열지 말 것. 채점 시트는 ../grading_test12_20261111/
+
+생성: 2026-11-11 (run_20261111_235156)
+코드: 커밋 4c60ec4 (수정 없이 실행)
+명령: python -m src.experiments.llm_eval.run_eval --questions src/experiments/llm_eval/questions_test.json --seed ﻿sd=941280
+조건: grounded(계산 결과 넣음) vs ungrounded(계산 결과 뺌) — 개발용 23문항(run_20261101_182940)과 같은 조건, 검증 장치 없음
+모델: ollama / exaone3.5:7.8b
+A/B 순서 시드: ﻿sd=941280 (무작위로 새로 뽑음. 기본값 42를 쓰면 공개된 개발용 키와 앞 12문항 순서가 같아짐)
