@@ -27,3 +27,5 @@ runs/
 
 # 시연 영상 (용량 큼, 사람 얼굴 포함)
 data/demo_videos/
+
+data/captures/
