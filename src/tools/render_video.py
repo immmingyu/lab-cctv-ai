@@ -290,24 +290,23 @@ class Renderer:
                 break
             if mirror:
                 frame = cv2.flip(frame, 1)
-            raw = frame.copy()
+            raw = frame.copy()   # 원본 (그림 없음). 사람 인식, 물건 인식, VLM 사진은 모두 이걸 씀
             new = []
 
-            if intr:
-                intr.draw(frame)
-            people = pose.estimate(frame)
+            # ===== 판단 (원본만 사용, 여기서는 그리지 않음) =====
+            people = pose.estimate(raw)
             if obj:
-                dets = obj.detect(frame)
+                dets = obj.detect(raw)
                 res = disp.update(dets, now=t, person_boxes=[p["bbox"] for p in people])
-                draw_objects(frame, dets, res)
                 if not res["calibrating"]:
                     for cls, r in res["results"].items():
                         if r.get("new_event"):
                             new.append(("object", f"물건 이동 · {OBJ_NAMES.get(cls, cls)} "
                                                   f"{OBJ_STATUS.get(r['status'], r['status'])}"))
+            person_draws = []
             for p in people:
                 tid = p["track_id"]
-                edge = touches_edge(p["bbox"], frame.shape)
+                edge = touches_edge(p["bbox"], raw.shape)
                 fs = fall.update(tid, fall.get_posture(p["keypoints"]), now=t, hold=edge)
                 ist = None
                 if intr:
@@ -315,7 +314,7 @@ class Renderer:
                     ist = intr.update(tid, intr.is_inside((int((x1 + x2) / 2), y2)), now=t)
                     if ist["new_event"]:
                         new.append(("intrusion", f"제한 구역 접근 · ID {tid} ({ist['duration']}초 머묾)"))
-                draw_person(frame, p, fs, edge, ist)
+                person_draws.append((p, fs, edge, ist))
                 if fs["new_event"]:
                     new.append(("fall", f"낙상 감지 · 위험도 {fs['new_event']}"))
                 if stillness:
@@ -328,6 +327,14 @@ class Renderer:
                             new.append(("vlm_yes", "VLM 확인: 누운 자세 → 낙상 의심"))
                         elif ans["lying"] is False:
                             new.append(("vlm_no", "VLM 확인: 누운 자세 아님"))
+
+            # ===== 그리기 (판단이 모두 끝난 뒤, 출력용 frame에만) =====
+            if intr:
+                intr.draw(frame)
+            if obj:
+                draw_objects(frame, dets, res)
+            for p, fs, edge, ist in person_draws:
+                draw_person(frame, p, fs, edge, ist)
 
             keep = any(a <= t <= b for a, b in clips)
             for kind, text in new:

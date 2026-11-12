@@ -115,6 +115,45 @@ def draw_objects(frame, detections, displacement_result):
                 y += 25
 
 
+def draw_person(frame, d):
+    """사람 한 명 그림 (판단이 모두 끝난 뒤 호출). d: 그림에 필요한 판단 결과"""
+    x1, y1, x2, y2 = d["bbox"]
+    track_id = d["track_id"]
+    if d["fall"] is not None:
+        fs = d["fall"]
+        color = RISK_COLORS[fs["risk"]]
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        label = f"ID {track_id} [{fs['posture']}] risk={fs['risk']}"
+        if fs["posture"] == "lying":
+            label += f" ({fs['duration']}s)"
+        cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+
+        keypoints = d["keypoints"]
+        for idx, (x, y) in keypoints.items():
+            if (x, y) != (0, 0):
+                cv2.circle(frame, (x, y), 3, (0, 255, 255), -1)
+        for (a, b) in SKELETON_LINES:
+            pa, pb = keypoints.get(a, (0, 0)), keypoints.get(b, (0, 0))
+            if pa != (0, 0) and pb != (0, 0):
+                cv2.line(frame, pa, pb, (255, 0, 0), 2)
+    else:
+        # 낙상 표시 없이 사람 박스와 ID만
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        cv2.putText(frame, f"ID {track_id}", (x1, y1 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+    if d["edge"]:   # 박스 위쪽이 잘릴 수 있어 박스 안쪽에 표시
+        cv2.putText(frame, "EDGE", (x1 + 5, y1 + 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
+
+    ist = d["intrusion"]
+    if ist is not None:
+        dot_color = (0, 0, 255) if ist["inside"] else (0, 255, 0)
+        cv2.circle(frame, d["foot_point"], 6, dot_color, -1)
+        if ist["inside"]:
+            cv2.putText(frame, f"IN AREA ({ist['duration']}s)",
+                        (x1, y2 + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+
+
 def main():
     args = parse_args()
     mode = args.only
@@ -149,34 +188,35 @@ def main():
             break
 
         pending_events = []  # 이번 프레임의 이벤트 (그리기가 끝난 뒤 스냅샷과 함께 저장)
-        raw_frame = frame.copy() if use_vlm else None   # VLM에 보낼 원본 (그림 없는 상태)
+        # 카메라 원본 (그림 없는 상태). 사람 인식, 물건 인식, VLM 사진은 모두 이걸 씀
+        # (화면에 그린 제한 구역 네모나 박스를 물건으로 잘못 인식하지 않게)
+        raw_frame = frame.copy()
 
-        # --- 제한 구역 표시 ---
-        if show_intrusion:
-            intrusion_detector.draw(frame)
-
-        # --- 사람 검출 (물건 박스를 그리기 전에) ---
-        people = pose_estimator.estimate(frame) if pose_estimator else []
+        # ===== 1. 판단 (원본 프레임만 사용, 여기서는 아무것도 그리지 않음) =====
+        # --- 사람 검출 ---
+        people = pose_estimator.estimate(raw_frame) if pose_estimator else []
 
         # --- 물건 이동 ---
         if show_object:
             # Pose 사람 박스를 넘겨서, 사람이 가리는 동안은 사라짐으로 세지 않게 함
-            obj_detections = object_detector.detect(frame)
+            obj_detections = object_detector.detect(raw_frame)
             displacement_result = displacement_detector.update(
                 obj_detections, person_boxes=[p["bbox"] for p in people])
-            draw_objects(frame, obj_detections, displacement_result)
             if not displacement_result["calibrating"]:
                 for cls, r in displacement_result["results"].items():
                     if r.get("new_event"):
                         pending_events.append(create_displacement_event(cls, r["duration"], reason=r["status"]))
 
         # --- 사람 (낙상 / 제한 구역) --- 물건 모드만 켰을 때는 사람을 화면에 그리지 않음 (예전과 같은 화면)
+        person_draws = []   # 그리기 단계에서 쓸 판단 결과
         for p in (people if show_people else []):
             track_id = p["track_id"]
             x1, y1, x2, y2 = p["bbox"]
             keypoints = p["keypoints"]
             # 몸이 화면 밖으로 잘림 -> 누움 쪽 판단과 VLM 보류 (화면에 EDGE로 표시해 촬영 구도 확인)
-            edge = touches_edge((x1, y1, x2, y2), frame.shape)
+            edge = touches_edge((x1, y1, x2, y2), raw_frame.shape)
+            draw_info = {"track_id": track_id, "bbox": (x1, y1, x2, y2), "keypoints": keypoints,
+                         "edge": edge, "fall": None, "intrusion": None, "foot_point": None}
 
             if show_fall:
                 posture = fall_detector.get_posture(keypoints)
@@ -184,21 +224,7 @@ def main():
                 posture = fall_status["posture"]
                 risk = fall_status["risk"]
                 duration = fall_status["duration"]
-
-                color = RISK_COLORS[risk]
-                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                label = f"ID {track_id} [{posture}] risk={risk}"
-                if posture == "lying":
-                    label += f" ({duration}s)"
-                cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-
-                for idx, (x, y) in keypoints.items():
-                    if (x, y) != (0, 0):
-                        cv2.circle(frame, (x, y), 3, (0, 255, 255), -1)
-                for (a, b) in SKELETON_LINES:
-                    pa, pb = keypoints.get(a, (0, 0)), keypoints.get(b, (0, 0))
-                    if pa != (0, 0) and pb != (0, 0):
-                        cv2.line(frame, pa, pb, (255, 0, 0), 2)
+                draw_info["fall"] = {"posture": posture, "risk": risk, "duration": duration}
 
                 log_track(track_id, (x1, y1, x2, y2), posture, duration, risk)
 
@@ -214,27 +240,17 @@ def main():
                         crop = crop_person(raw_frame, (x1, y1, x2, y2))   # 박스, 뼈대가 그려지기 전 원본에서 자름
                         vlm_jobs.append((vlm_pool.submit(vlm.ask_lying, crop), track_id, (x1, y1, x2, y2), st["still"]))
                         print(f"[VLM] ID {track_id} {st['still']}초 정지, 규칙={posture} -> 재확인 요청")
-            else:
-                # 낙상 표시 없이 사람 박스와 ID만
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(frame, f"ID {track_id}", (x1, y1 - 10),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-
-            if edge:   # 박스 위쪽이 잘릴 수 있어 박스 안쪽에 표시
-                cv2.putText(frame, "EDGE", (x1 + 5, y1 + 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
 
             if show_intrusion:
                 foot_point = get_foot_point((x1, y1, x2, y2))
                 intrusion_status = intrusion_detector.update(track_id, intrusion_detector.is_inside(foot_point))
-
-                dot_color = (0, 0, 255) if intrusion_status["inside"] else (0, 255, 0)
-                cv2.circle(frame, foot_point, 6, dot_color, -1)
-                if intrusion_status["inside"]:
-                    cv2.putText(frame, f"IN AREA ({intrusion_status['duration']}s)",
-                                (x1, y2 + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                draw_info["intrusion"] = intrusion_status
+                draw_info["foot_point"] = foot_point
 
                 if intrusion_status["new_event"]:
                     pending_events.append(create_intrusion_event(track_id, intrusion_status["duration"]))
+
+            person_draws.append(draw_info)
 
         # --- VLM 답이 온 것만 처리 (안 끝난 건 다음 프레임에서 다시 확인) ---
         for job in [j for j in vlm_jobs if j[0].done()]:
@@ -244,6 +260,14 @@ def main():
             print(f"[VLM] ID {track_id} 답: {ans}")
             if ans["lying"]:
                 pending_events.append(create_vlm_fall_event(track_id, bbox, still, ans["reason"]))
+
+        # ===== 2. 그리기 (판단이 모두 끝난 뒤, 화면 표시용 frame에만) =====
+        if show_intrusion:
+            intrusion_detector.draw(frame)
+        if show_object:
+            draw_objects(frame, obj_detections, displacement_result)
+        for d in person_draws:
+            draw_person(frame, d)
 
         for ev in pending_events:
             save_event(ev, frame)
