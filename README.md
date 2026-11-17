@@ -13,6 +13,29 @@
 
 (2026-10-14 실시간 화면 캡처. 화면에 나온 사람은 팀원이며 공개에 동의했다.)
 
+**시스템 흐름**
+
+```mermaid
+flowchart LR
+    CAM[USB 카메라] --> POSE["사람 인식<br/>yolov8n-pose"]
+    CAM --> OBJ["물건 인식<br/>yolov8s 또는 파인튜닝 모델"]
+    POSE --> RULE["시간 흐름 판단<br/>낙상 · 제한 구역 · 물건 이동"]
+    OBJ --> RULE
+    RULE -- "8초 정지 + 규칙은 누움 아님" --> VLM["조건부 VLM<br/>qwen3-vl:4b (로컬)"]
+    VLM -- "누운 자세" --> EV[이벤트]
+    RULE --> EV
+    EV -- "POST /events" --> BE["백엔드 FastAPI<br/>SQLite 저장"]
+    BE --> SUM["LLM 상황 요약<br/>exaone3.5:7.8b (로컬)"]
+    BE --> DASH[대시보드]
+    DASH -- "질문 POST /chat" --> CALC["코드: 날짜·시간 범위, 건수 계산"]
+    CALC --> ANS["LLM: 문장으로 설명"]
+    ANS --> DASH
+```
+
+- 실시간 감지는 `src/main.py`, 백엔드는 `backend/app.py`, 대시보드는 `frontend/index.html`이다.
+- 사람·물건 인식과 VLM 사진은 그림을 그리기 전 원본 프레임을 쓴다.
+- HIGH 이벤트를 Discord로 보내는 기능은 `.env`에 웹훅 주소가 있을 때만 켜진다(선택).
+
 ---
 
 ## 1. 문제와 설계
@@ -78,7 +101,7 @@ CCTV 알림에서 필요한 것은 "지금 이 프레임"이 아니라 **"일정
 
 ## 2. 결과
 
-모든 숫자는 **분자/분모**로 적었다. 근거 파일 중 `data/replay_results/`는 사람 얼굴이 담긴 녹화에서 나온 로컬 결과라 git에 없다. 숫자 검증 과정은 [PUBLISH_CHECK.md](PUBLISH_CHECK.md)에 있다.
+모든 숫자는 **분자/분모**로 적었다. 근거 파일 중 `data/replay_results/`는 사람 얼굴이 담긴 녹화에서 나온 로컬 결과라 git에 없다. 숫자마다 계산 방법과 근거 파일은 [docs/VERIFICATION.md](docs/VERIFICATION.md)에 있다.
 
 ### 2-1. 낙상·제한 구역 (학교 시험 영상 3명, 2026-11-04 촬영)
 
@@ -95,7 +118,7 @@ CCTV 알림에서 필요한 것은 "지금 이 프레임"이 아니라 **"일정
 - **VLM 호출:** 모두 16번이다.
   - "예" 4번은 모두 일직선 눕기 시도 안에서 나왔다.
   - "아니오" 12번에는 **가만히 앉아 있는 장면 6번(앉기 시도 전부)** 이 포함된다. VLM 때문에 생긴 오경보는 없다.
-- 근거: `data/replay_results/eval2_people_school_p{1,2,3}_*_test/` (`replay_trials.csv`, `replay_events.csv`, `vlm_calls.csv`, git 밖), PUBLISH_CHECK.md 2-2, 2-3
+- 근거: `data/replay_results/eval2_people_school_p{1,2,3}_*_test/` (`replay_trials.csv`, `replay_events.csv`, `vlm_calls.csv`, git 밖), [docs/VERIFICATION.md](docs/VERIFICATION.md) 1절
 
 ### 2-2. 물건 이동과 책 검출 (학교 시험 영상 1개, 2026-11-04 촬영)
 
@@ -112,7 +135,7 @@ CCTV 알림에서 필요한 것은 "지금 이 프레임"이 아니라 **"일정
 - **파인튜닝만 한 경우:** 오경보는 없지만, 예전 로직은 "사라짐" 판단이 없어서 들고 나가는 시도 5번(#6~10)을 원래 잡을 수 없다.
 - **둘 다 한 경우:** 두 문제가 함께 풀렸다.
 - 기준값만 다시 고른 기본 모델(책 0.14)은 고친 로직에서 14/15, 9/11, 시도 밖 7이었다.
-- 근거: `data/replay_results/eval2_object_school_20261104_135118_{base,base_f1,ft_v1}/` (git 밖), PUBLISH_CHECK.md 2-5
+- 근거: `data/replay_results/eval2_object_school_20261104_135118_{base,base_f1,ft_v1}/` (git 밖), [docs/VERIFICATION.md](docs/VERIFICATION.md) 2절
 
 **책 검출 재현율** (학교 영상에서 5초 간격으로 뽑은 169장, 정답 책 박스 158개, IoU 0.5 이상)
 
@@ -191,7 +214,9 @@ CCTV 알림에서 필요한 것은 "지금 이 프레임"이 아니라 **"일정
   - 판정 기준(O/△/X, 지어냄)은 시험용 채점 전에 글로 정리했다. 개발용 채점 때는 기준을 글로 남기지 않았다.
   - **한계:** "계산 결과 넣음" 조건은 범위 안에 기록이 없으면 코드가 고정 문장으로 답한다. 시험용 12문항 중 2문항이 그런 답이라, 문장 모양으로 조건을 짐작할 수 있었다. 채점자 1명, 답 생성 1회의 결과다.
 
-## 평가 설정 (확정: 2026-11-03, 새 영상 검증 전 고정)
+<details>
+<summary>평가 설정 (확정: 2026-11-03, 새 영상 검증 전 고정)</summary>
+
 2026-11-03 녹화 영상은 개발용으로만 쓰고, 아래 값은 새 영상 결과를 보고 다시 바꾸지 않는다.
 
 | 항목 | 값 | 위치 |
@@ -204,6 +229,8 @@ CCTV 알림에서 필요한 것은 "지금 이 프레임"이 아니라 **"일정
 | VLM 모델 | 로컬 Ollama `qwen3-vl:4b-instruct` (`.env`의 `VLM_MODEL`) | `src/config.py` |
 
 가장자리 처리 변경 (2026-11-03, B안): 처음에는 가장자리 프레임의 모든 자세 판단을 보류했으나, 서 있는 사람은 화면 위아래 끝에 닿기 쉬워 일어선 프레임까지 보류되면서 자세 상태가 '누움'으로 멈추고 회복이 인정되지 않았다(개발용 영상에서 옆 눕기 여러 시도가 한 사건으로 묶임). 잘린 몸 때문에 생기는 낙상 오경보를 막는다는 목적은 누움 쪽만 보류해도 지켜지므로 B안으로 확정. 5픽셀 값은 그대로 유지.
+
+</details>
 
 ---
 
@@ -240,7 +267,7 @@ python -m pip install -r requirements.txt
 |---|---|---|
 | LLM 답변 검증 장치 테스트 (9개) | `python -m tests.test_verify` | 없음 (카메라, LLM 불필요) |
 | 백엔드 + 대시보드 | `uvicorn backend.app:app` → `http://127.0.0.1:8000/` | 카메라 불필요. LLM 요약·질문 답변에는 Ollama + `ollama pull exaone3.5:7.8b` |
-| LLM 평가 다시 돌리기 | `python -m src.experiments.llm_eval.run_eval --questions src/experiments/llm_eval/questions_test.json` → 채점 → `score_eval` | Ollama + `exaone3.5:7.8b`. 평가용 이벤트 DB(`data/llm_eval/eval_events.db`)는 저장소에 있다 |
+| LLM 평가 다시 돌리기 | `python -m src.experiments.llm_eval.run_eval --questions src/experiments/llm_eval/questions_test.json` → 채점 → `score_eval` | Ollama + `exaone3.5:7.8b`. 평가용 이벤트 DB(`data/llm_eval/eval_events.db`)는 저장소에 있다. 지금 코드는 예전 시각 형식(`LEGACY_TIME_FORMAT = True`)이라, 대표 결과(10/12, 24시간제 형식)와 같은 조건이 아니다 |
 
 ### 카메라나 녹화 파일이 있어야 되는 것
 | 무엇 | 명령 | 필요한 것 |
@@ -256,4 +283,4 @@ python -m pip install -r requirements.txt
 
 ## 6. 역할
 
-캡스톤 디자인 3인 팀 프로젝트다. 기획, 설계, 구현, 실험은 1인(immmingyu)이 단독으로 했다.
+캡스톤 디자인 3인 팀 프로젝트다. 기획, 설계, 구현, 실험은 1인(immmingyu)이 단독으로 했다. 팀원은 실험 영상 촬영 참여와 LLM 평가의 블라인드 채점을 도왔다.

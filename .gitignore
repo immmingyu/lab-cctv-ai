@@ -30,3 +30,6 @@ data/demo_videos/
 
 data/captures/
 .DS_Store
+
+# 공개 전 내부 점검 메모 (개인 정보 포함, 숫자 검증은 docs/VERIFICATION.md)
+PUBLISH_CHECK.md
