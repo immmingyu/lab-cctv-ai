@@ -1,4 +1,5 @@
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import List, Literal, Optional
@@ -22,7 +23,21 @@ SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/snapshots", StaticFiles(directory=SNAPSHOT_DIR), name="snapshots")
 
 print(f"[LLM] provider={PROVIDER}, model={MODEL}")  # ★ 어떤 LLM을 쓰는지 서버 시작 시 표시
-print(f"[Discord] {'켜짐 (HIGH 이벤트 텍스트 전송)' if notify.is_enabled() else '꺼짐 (.env 의 DISCORD_WEBHOOK_URL 없음)'}")
+print(f"[Discord] {notify.describe()}")
+
+
+def _env_flag(name):
+    """1/true/yes/on 이면 켜짐. 없거나 다른 값이면 꺼짐(기본값)."""
+    return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+# 대시보드 알림 기본값 (전시회용, 둘 다 기본은 꺼짐 = 예전과 같음). 대시보드에서도 켜고 끌 수 있다.
+DASHBOARD_ALERTS = {
+    "extra_sound": _env_flag("DASHBOARD_EXTRA_SOUND"),   # 제한 구역 접근·물건 이동에도 가벼운 소리
+    "low_banner": _env_flag("DASHBOARD_LOW_BANNER"),     # 물건 이동(LOW)에도 배너
+}
+print(f"[대시보드 알림] 제한 구역·물건 이동 소리 {'켜짐' if DASHBOARD_ALERTS['extra_sound'] else '꺼짐'}, "
+      f"LOW 배너 {'켜짐' if DASHBOARD_ALERTS['low_banner'] else '꺼짐'}")
 
 
 class EventIn(BaseModel):
@@ -56,6 +71,12 @@ def dashboard():
     return FileResponse(FRONTEND_DIR / "index.html")
 
 
+@app.get("/alert-config")
+def alert_config():
+    """대시보드가 시작할 때 읽는 알림 기본값 (.env)."""
+    return DASHBOARD_ALERTS
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "llm_provider": PROVIDER, "llm_model": MODEL}
@@ -78,8 +99,8 @@ def create_event(event: EventIn, background_tasks: BackgroundTasks):  # ★
 
     data = event.model_dump()
     background_tasks.add_task(add_llm_summary, row_id, data)  # ★
-    # LLM 요약을 기다리지 않고 따로 보냄 (HIGH일 때만, 텍스트만)
-    background_tasks.add_task(notify.notify_high, data)
+    # LLM 요약을 기다리지 않고 따로 보냄 (기본은 HIGH일 때만, .env 의 DISCORD_NOTIFY_TYPES 로 변경, 텍스트만)
+    background_tasks.add_task(notify.notify_event, data)
     return {"id": row_id, "status": "saved"}
 
 

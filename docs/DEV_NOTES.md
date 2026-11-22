@@ -303,3 +303,23 @@ Ollama는 모델을 처음 쓸 때 GPU에 올리느라 오래 걸린다(VLM 첫 
 - `python -m src.tools.warmup` (`--no-vlm`이면 LLM만): 처음 올릴 때 각각 약 20초 걸린다.
 - `scripts/start_demo.ps1`, `start_demo.sh`: Ollama 확인 직후 자동 실행한다. 실패해도 멈추지 않고 알려만 준다.
 - `main.py`: 시작할 때 별도 스레드에서 실행한다. 영상 처리는 기다리지 않고 바로 시작한다.
+
+## 전시회용 알림 설정 (2026-11-22)
+알림만 바꾸는 설정이다. 판단 로직, 기준값, 이벤트 생성·저장은 그대로다. `.env`에 아무것도 넣지 않으면 예전과 똑같이 동작한다.
+
+| `.env` | 기본 (비워둠) | 설정하면 |
+|---|---|---|
+| `DISCORD_NOTIFY_TYPES` | HIGH 이상만 보냄, 간격 제한 없음 | 적은 종류만 보냄. `fall_high`, `fall_medium`(VLM 낙상 의심 포함), `restricted_area_intrusion`, `object_displacement`를 쉼표로 |
+| `DISCORD_NOTIFY_COOLDOWN_SECONDS` | 60 | 같은 종류는 이 시간(초)에 한 번만. `DISCORD_NOTIFY_TYPES`가 있을 때만 적용 |
+| `DASHBOARD_EXTRA_SOUND` | 꺼짐 | `1`이면 제한 구역 접근(딩-동)과 물건 이동(띵)에도 소리. 딩-동은 사인파 두 음, 띵은 삼각파 한 음(0.35초). 둘 다 낙상 HIGH 경고음(사각파 세 번)보다 가벼운 소리. HIGH와 같이 오면 HIGH 경고음만 |
+| `DASHBOARD_LOW_BANNER` | 꺼짐 | `1`이면 물건 이동(LOW)도 파란 배너, 10초 뒤 저절로 사라짐 |
+
+- 전시회 예시:
+  ```
+  DISCORD_NOTIFY_TYPES=fall_high,restricted_area_intrusion,object_displacement
+  DASHBOARD_EXTRA_SOUND=1
+  DASHBOARD_LOW_BANNER=1
+  ```
+- `.env`를 바꾸면 백엔드(`uvicorn`)를 다시 시작해야 한다. 시작할 때 `[Discord]`, `[대시보드 알림]` 줄에 적용된 설정이 나온다.
+- 대시보드 위쪽 체크박스(구역·물건 소리, 물건 이동 배너)로 그 자리에서 켜고 끌 수 있다. 새로고침하면 `.env` 값으로 돌아간다. 소리는 예전처럼 "알림 켜기"를 한 번 눌러야 난다.
+- 코드: `backend/notify.py` `notify_event`, `backend/app.py` `/alert-config`, `frontend/index.html` `chime`, `setupAlertOptions`

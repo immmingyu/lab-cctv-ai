@@ -34,7 +34,7 @@ flowchart LR
 
 - 실시간 감지는 `src/main.py`, 백엔드는 `backend/app.py`, 대시보드는 `frontend/index.html`이다.
 - 사람·물건 인식과 VLM 사진은 그림을 그리기 전 원본 프레임을 쓴다.
-- HIGH 이벤트를 Discord로 보내는 기능은 `.env`에 웹훅 주소가 있을 때만 켜진다(선택).
+- HIGH 이벤트를 Discord로 보내는 기능은 `.env`에 웹훅 주소가 있을 때만 켜진다(선택). 보낼 종류와 대시보드 소리·배너는 `.env`로 바꿀 수 있다([docs/DEV_NOTES.md](docs/DEV_NOTES.md) "전시회용 알림 설정").
 
 ---
 
