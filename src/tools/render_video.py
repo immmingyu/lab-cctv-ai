@@ -11,7 +11,7 @@
   --start/--end/--clips는 '저장할 구간'만 고름 -> 물건 원래 위치(처음 3초)와 정지 시간이 실제와 같게 잡힘
 - VLM: 호출하는 동안 재생을 멈추고 답을 기다림 (재생 평가와 같음). 배너는 사진을 자른 시각에 뜸
   (실시간에서는 응답 시간만큼 늦게 뜸). 시작 전에 준비 호출 한 번
-- 한글 배너는 PIL + 맑은 고딕. H.264 MP4는 ffmpeg(PATH 또는 imageio-ffmpeg)로, 없으면 mp4v로 저장
+- 한글 배너는 PIL + 맑은 고딕 (macOS는 Apple SD 고딕 Neo). H.264 MP4는 ffmpeg(PATH 또는 imageio-ffmpeg)로, 없으면 mp4v로 저장
 """
 import argparse
 import csv
@@ -41,8 +41,12 @@ RISK_COLORS = {"LOW": (0, 255, 0), "MEDIUM": (0, 165, 255), "HIGH": (0, 0, 255)}
 TARGET_OBJECTS = ["laptop", "book"]
 
 BANNER_SECONDS = 3.0
-FONT_PATHS = ["C:/Windows/Fonts/malgunbd.ttf", "C:/Windows/Fonts/malgun.ttf",
-              "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf"]
+FONT_PATHS = [("C:/Windows/Fonts/malgunbd.ttf", 0), ("C:/Windows/Fonts/malgun.ttf", 0),
+              ("/System/Library/Fonts/AppleSDGothicNeo.ttc", 6),          # macOS: Apple SD 고딕 Neo Bold
+              ("/System/Library/Fonts/Supplemental/AppleGothic.ttf", 0),  # macOS 예비
+              ("/Library/Fonts/NanumGothicBold.ttf", 0),
+              (str(Path.home() / "Library/Fonts/NanumGothicBold.ttf"), 0),
+              ("/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf", 0)]   # (경로, .ttc 안의 글꼴 번호)
 BANNER_COLORS = {"fall": (220, 40, 40), "vlm_yes": (200, 30, 120), "vlm_no": (90, 90, 90),
                  "intrusion": (230, 120, 0), "object": (40, 90, 220)}   # RGB (PIL)
 OBJ_NAMES = {"book": "책", "laptop": "노트북"}
@@ -123,10 +127,10 @@ class Writer:
 
 
 def load_font(size):
-    for f in FONT_PATHS:
+    for f, index in FONT_PATHS:
         if Path(f).exists():
-            return ImageFont.truetype(f, size)
-    raise SystemExit("한글 글꼴을 찾지 못했습니다 (맑은 고딕 등).")
+            return ImageFont.truetype(f, size, index=index)
+    raise SystemExit("한글 글꼴을 찾지 못했습니다 (맑은 고딕, Apple SD 고딕 Neo, 나눔고딕 등).")
 
 
 def draw_objects(frame, detections, res):
